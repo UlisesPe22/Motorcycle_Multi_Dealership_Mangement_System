@@ -1,24 +1,28 @@
 import os
 import io
-from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session
 from pypdf import PdfReader, PdfWriter
 
-from config import CONFIDENCE_THRESHOLD, SERIE_LENGTH, MOTOR_LENGTH
-from models.event import Event, EventStatus
-from models.submission import Submission, SubmissionStatus
+from config import SERIE_LENGTH, MOTOR_LENGTH
+from models.event import Event
+from models.submission import Submission
 from models.motorcycle import Motorcycle, MotorcycleStatus
 from services.main_pipeline import (
     get_model,
     call_gemini_pdf,
     call_gemini_image,
     log_ai,
-    reject_submission,
-    reject_event,
 )
-from services.image_utils import load_image_as_pil, pil_to_jpeg_bytes
+from services.pipeline_utils import (
+    load_image_as_pil,
+    pil_to_jpeg_bytes,
+    _levenshtein,
+    reject_and_return,
+    check_confidence,
+    mark_complete,
+)
 
 # ======================================================================== #
 # Constants                                                                 #
@@ -27,8 +31,9 @@ from services.image_utils import load_image_as_pil, pil_to_jpeg_bytes
 NOT_PURCHASED_SENTINEL_MODEL_ID = 9999
 
 # ======================================================================== #
-# Prompts                                          #
+# Prompts                                                                   #
 # ======================================================================== #
+
 TABLE_DETECTION_PROMPT = """
 You are analyzing a scanned document image of a motorcycle delivery form.
 Return ONLY a valid JSON object. No explanation, no markdown, no text outside the JSON.
@@ -158,7 +163,7 @@ HOW TO EXTRACT NO.SERIE:
 - It contains only letters and numbers, no hyphens
 - It is always exactly 17 characters long
 - Examples: "MD2A67MX9TCJ01148", "MD2C19BX7TWJ51566", "MD2B54DX0TCB00883"
-- Copy it exactly as written character by 
+- Copy it exactly as written character by character
 - WARNING 1: this column may have handwritten marks, checkmarks, ink stamps,
   or pen strokes written next to or overlapping the printed value.
   These handwritten elements are NOT part of the serie number.
@@ -206,6 +211,7 @@ Set below 0.75 if the image is blurry, if any value is unreadable, or if the
 attention zone does not clearly contain a motorcycle data table.
 """
 
+
 # ======================================================================== #
 # PDF splitting                                                             #
 # ======================================================================== #
@@ -251,12 +257,6 @@ def _load_pages(raw_path: str) -> list[tuple[bytes, str]]:
 # DB-based string validation and autocorrect                               #
 # ======================================================================== #
 
-def _levenshtein(s1: str, s2: str) -> int:
-    if len(s1) != len(s2):
-        return abs(len(s1) - len(s2))
-    return sum(c1 != c2 for c1, c2 in zip(s1, s2))
-
-
 def _autocorrect_against_pool(
     gemini_value: str,
     expected_length: int,
@@ -274,11 +274,9 @@ def _autocorrect_against_pool(
     """
     clean = gemini_value.replace(" ", "").upper()
 
-    # Exact match
     if clean in [p.upper() for p in pool]:
         return clean, "exact"
 
-    # Distance-1 candidates
     candidates = [
         p for p in pool
         if len(p) == expected_length and _levenshtein(clean, p.upper()) == 1
@@ -326,7 +324,6 @@ def _match_motorcycle(
         motor, MOTOR_LENGTH, pool_motors
     )
 
-    # Try to find motorcycle by serie
     matched_by_serie = None
     if serie_status in ("exact", "corrected"):
         matched_by_serie = next(
@@ -337,7 +334,6 @@ def _match_motorcycle(
             None
         )
 
-    # Try to find motorcycle by motor
     matched_by_motor = None
     if motor_status in ("exact", "corrected"):
         matched_by_motor = next(
@@ -348,12 +344,10 @@ def _match_motorcycle(
             None
         )
 
-    # Resolution logic
     if matched_by_serie and matched_by_motor:
         if matched_by_serie.motorcycle_id == matched_by_motor.motorcycle_id:
             return matched_by_serie, serie_status, motor_status, "both"
         else:
-            # Different motorcycles matched — trust serie
             return matched_by_serie, serie_status, motor_status, "serie"
 
     if matched_by_serie:
@@ -362,7 +356,6 @@ def _match_motorcycle(
     if matched_by_motor:
         return matched_by_motor, serie_status, motor_status, "motor"
 
-    # Both ambiguous → hard stop signal
     if serie_status == "ambiguous" and motor_status == "ambiguous":
         return None, serie_status, motor_status, "hard_stop"
 
@@ -372,7 +365,6 @@ def _match_motorcycle(
     if motor_status == "ambiguous" and serie_status in ("not_found",):
         return None, serie_status, motor_status, "hard_stop"
 
-    # Neither found → not_purchased
     return None, serie_status, motor_status, "not_found"
 
 
@@ -439,20 +431,12 @@ def handle_delivery_confirmation(
     # ------------------------------------------------------------------ #
     raw_path = submission.raw_file_path
     if not raw_path or not os.path.exists(raw_path):
-        reason = "Archivo no encontrado en disco."
-        reject_submission(db, submission, reason)
-        reject_event(db, event, reason)
-        db.commit()
-        return False, reason
+        return reject_and_return(db, submission, event, "Archivo no encontrado en disco.")
 
     try:
         pages = _load_pages(raw_path)
     except Exception as e:
-        reason = f"Error al cargar el archivo: {e}"
-        reject_submission(db, submission, reason)
-        reject_event(db, event, reason)
-        db.commit()
-        return False, reason
+        return reject_and_return(db, submission, event, f"Error al cargar el archivo: {e}")
 
     # ------------------------------------------------------------------ #
     # 2. Process each page — two prompts per page                         #
@@ -461,9 +445,9 @@ def handle_delivery_confirmation(
     all_extracted = []
 
     for page_index, (page_bytes, mime_type) in enumerate(pages):
-        page_num = page_index + 1
-        step_detect   = f"table_detection_page_{page_num}"
-        step_extract  = f"extraction_page_{page_num}"
+        page_num     = page_index + 1
+        step_detect  = f"table_detection_page_{page_num}"
+        step_extract = f"extraction_page_{page_num}"
 
         # Prompt 1 — table detection
         try:
@@ -474,36 +458,19 @@ def handle_delivery_confirmation(
         except ValueError as e:
             reason = f"Error en detección de tabla página {page_num}: {e}"
             log_ai(db, submission.submission_id, step_detect, str(e), None, None, False)
-            reject_submission(db, submission, reason)
-            reject_event(db, event, reason)
-            db.commit()
-            return False, reason
+            return reject_and_return(db, submission, event, reason)
 
         confidence1 = dict1.get("overall_confidence")
-        log_ai(
-            db, submission.submission_id, step_detect,
-            raw1, dict1, confidence1,
-            confidence1 is not None and confidence1 >= CONFIDENCE_THRESHOLD,
+        ok, msg = check_confidence(
+            db, submission, event, confidence1,
+            step_detect, raw1, dict1,
         )
-
-        if confidence1 is None or confidence1 < CONFIDENCE_THRESHOLD:
-            reason = (
-                f"Confianza insuficiente en detección de tabla "
-                f"página {page_num} ({confidence1}). "
-                f"Por favor sube una imagen más clara."
-            )
-            reject_submission(db, submission, reason)
-            reject_event(db, event, reason)
-            db.commit()
-            return False, reason
+        if not ok: return ok, msg
 
         table_coords = dict1.get("table_coordinates")
         if not table_coords:
             reason = f"No se encontraron coordenadas de tabla en página {page_num}."
-            reject_submission(db, submission, reason)
-            reject_event(db, event, reason)
-            db.commit()
-            return False, reason
+            return reject_and_return(db, submission, event, reason)
 
         # Prompt 2 — data extraction using coordinates as context
         extraction_prompt = EXTRACTION_PROMPT_TEMPLATE.replace(
@@ -518,28 +485,14 @@ def handle_delivery_confirmation(
         except ValueError as e:
             reason = f"Error en extracción de datos página {page_num}: {e}"
             log_ai(db, submission.submission_id, step_extract, str(e), None, None, False)
-            reject_submission(db, submission, reason)
-            reject_event(db, event, reason)
-            db.commit()
-            return False, reason
+            return reject_and_return(db, submission, event, reason)
 
         confidence2 = dict2.get("overall_confidence")
-        log_ai(
-            db, submission.submission_id, step_extract,
-            raw2, dict2, confidence2,
-            confidence2 is not None and confidence2 >= CONFIDENCE_THRESHOLD,
+        ok, msg = check_confidence(
+            db, submission, event, confidence2,
+            step_extract, raw2, dict2,
         )
-
-        if confidence2 is None or confidence2 < CONFIDENCE_THRESHOLD:
-            reason = (
-                f"Confianza insuficiente en extracción de datos "
-                f"página {page_num} ({confidence2}). "
-                f"Por favor sube una imagen más clara."
-            )
-            reject_submission(db, submission, reason)
-            reject_event(db, event, reason)
-            db.commit()
-            return False, reason
+        if not ok: return ok, msg
 
         page_motorcycles = dict2.get("motorcycles", [])
         all_extracted.extend(page_motorcycles)
@@ -554,10 +507,7 @@ def handle_delivery_confirmation(
             f"no coincide con el total declarado ({declared_count}). "
             f"Por favor verifica el documento e intenta de nuevo."
         )
-        reject_submission(db, submission, reason)
-        reject_event(db, event, reason)
-        db.commit()
-        return False, reason
+        return reject_and_return(db, submission, event, reason)
 
     # ------------------------------------------------------------------ #
     # 4. Load incoming pool for dealership                                #
@@ -570,7 +520,7 @@ def handle_delivery_confirmation(
     # ------------------------------------------------------------------ #
     # 5. Match each extracted pair against pool                           #
     # ------------------------------------------------------------------ #
-    consumed_ids = set()
+    consumed_ids       = set()
     validation_results = []
     hard_stop_detected = False
     hard_stop_reason   = None
@@ -583,7 +533,6 @@ def handle_delivery_confirmation(
             serie, motor, incoming_pool, consumed_ids
         )
 
-        # Get model info for terminal display
         if matched_moto and matched_moto.model:
             model_name = matched_moto.model.canonical_name
             year       = matched_moto.model.year
@@ -625,10 +574,7 @@ def handle_delivery_confirmation(
     # 7. Hard stop if ambiguity detected                                  #
     # ------------------------------------------------------------------ #
     if hard_stop_detected:
-        reject_submission(db, submission, hard_stop_reason)
-        reject_event(db, event, hard_stop_reason)
-        db.commit()
-        return False, hard_stop_reason
+        return reject_and_return(db, submission, event, hard_stop_reason)
 
     # ------------------------------------------------------------------ #
     # 8. All or nothing commit                                            #
@@ -638,7 +584,6 @@ def handle_delivery_confirmation(
         match_via    = result["match_via"]
 
         if match_via == "not_found":
-            # Create not_purchased motorcycle
             new_moto = Motorcycle(
                 model_id                 = NOT_PURCHASED_SENTINEL_MODEL_ID,
                 dealership_id            = dealership_id,
@@ -649,9 +594,7 @@ def handle_delivery_confirmation(
             )
             db.add(new_moto)
             db.flush()
-
         else:
-            # Transition to in_stock
             matched_moto.status                   = MotorcycleStatus.in_stock
             matched_moto.delivery_confirmation_id = submission.submission_id
             db.flush()
@@ -659,16 +602,12 @@ def handle_delivery_confirmation(
     # ------------------------------------------------------------------ #
     # 9. Mark submission and event complete                               #
     # ------------------------------------------------------------------ #
-    submission.status        = SubmissionStatus.complete
-    submission.submitted_at  = datetime.now(timezone.utc)
-    event.status             = EventStatus.complete
-    event.completed_at       = datetime.now(timezone.utc)
-    event.linked_entity_type = "DELIVERY_CONFIRMATION"
-    event.linked_entity_id   = submission.submission_id
+    mark_complete(
+        db, submission, event,
+        "DELIVERY_CONFIRMATION", submission.submission_id,
+    )
 
-    db.commit()
-
-    in_stock_count     = sum(1 for r in validation_results if r["match_via"] != "not_found")
+    in_stock_count      = sum(1 for r in validation_results if r["match_via"] != "not_found")
     not_purchased_count = sum(1 for r in validation_results if r["match_via"] == "not_found")
 
     return True, (

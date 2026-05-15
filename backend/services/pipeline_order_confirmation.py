@@ -1,12 +1,11 @@
 import os
-from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from config import CONFIDENCE_THRESHOLD ,SERIE_LENGTH, MOTOR_LENGTH 
-from models.event import Event, EventStatus
-from models.submission import Submission, SubmissionStatus
+from config import SERIE_LENGTH, MOTOR_LENGTH
+from models.event import Event
+from models.submission import Submission
 from models.motorcycle import Motorcycle, MotorcycleStatus
 from models.motorcycle_catalog import MotorcycleCatalog
 from models.order_confirmation_document import OrderConfirmationDocument
@@ -15,18 +14,18 @@ from services.main_pipeline import (
     get_model,
     call_gemini_pdf,
     log_ai,
-    reject_submission,
-    reject_event,
 )
-from services.image_utils import extract_clean_pdf_text, validate_and_correct_string
+from services.pipeline_utils import (
+    reject_and_return,
+    check_confidence,
+    load_pdf_with_text,
+    validate_string_list,
+    mark_complete,
+)
+
 
 # ======================================================================== #
-# Constants                                                                 #
-# ======================================================================== #
-
-
-# ======================================================================== #
-# Prompt — to be built later                                                #
+# Prompt                                                                    #
 # ======================================================================== #
 
 def _build_order_confirmation_prompt() -> str:
@@ -122,6 +121,8 @@ overall_confidence: float between 0.0 and 1.0.
 Reflects how clearly you could read the domicilio field and all table rows.
 Set below 0.75 ONLY if the domicilio is missing or any motor/serie value is unreadable.
 """
+
+
 # ======================================================================== #
 # Helpers                                                                   #
 # ======================================================================== #
@@ -183,7 +184,6 @@ def _find_matching_purchased_motorcycle(
     """
     Finds the oldest purchased motorcycle matching model_id and dealership.
     Greedy by created_at — oldest unmatched record gets priority.
-    model_id here refers to MotorcycleCatalog.model_id.
     """
     return db.query(Motorcycle).filter(
         Motorcycle.model_id      == model_id,
@@ -203,49 +203,30 @@ def handle_order_confirmation(
 ) -> tuple[bool, str]:
     """
     Pipeline for order_confirmation event.
-    1.  Load PDF from disk.
-    2.  Extract clean PDF text via pdfplumber.
-    3.  Call Gemini for extraction.
-    4.  Validate confidence and required fields.
-    5.  Match domicilio to dealership via ilike.
-    6.  Validate and auto-correct serie numbers against PDF ground truth.
-    7.  Validate and auto-correct motor numbers against PDF ground truth.
-    8.  Build canonical names list from catalog.
-    9.  Parse model names — extract canonical name, color, year.
-    10. Look up model_id from motorcycle_catalog — hard stop if not found.
-    11. Create OrderConfirmationDocument row.
-    12. Match each motorcycle to purchased record or create as not_purchased.
-    13. Mark submission and event complete.
+    1.  Load PDF from disk and extract clean text.
+    2.  Call Gemini for extraction.
+    3.  Validate confidence and required fields.
+    4.  Match domicilio to dealership via ilike.
+    5.  Validate and auto-correct serie numbers against PDF ground truth.
+    6.  Validate and auto-correct motor numbers against PDF ground truth.
+    7.  Build canonical names list from catalog.
+    8.  Parse model names — extract canonical name, color, year.
+    9.  Look up model_id from motorcycle_catalog — hard stop if not found.
+    10. Create OrderConfirmationDocument row.
+    11. Match each motorcycle to purchased record or create as not_purchased.
+    12. Mark submission and event complete.
     """
 
     # ------------------------------------------------------------------ #
-    # 1. Load PDF from disk                                               #
+    # 1. Load PDF from disk and extract clean text                        #
     # ------------------------------------------------------------------ #
-    raw_path = submission.raw_file_path
-    if not raw_path or not os.path.exists(raw_path):
-        reason = "Archivo PDF no encontrado en disco."
-        reject_submission(db, submission, reason)
-        reject_event(db, event, reason)
-        db.commit()
-        return False, reason
-
-    with open(raw_path, "rb") as f:
-        pdf_bytes = f.read()
+    pdf_bytes, remaining_text, err = load_pdf_with_text(
+        db, submission, event, submission.raw_file_path
+    )
+    if err: return err
 
     # ------------------------------------------------------------------ #
-    # 2. Extract clean PDF text for validation                            #
-    # ------------------------------------------------------------------ #
-    try:
-        clean_pdf_text = extract_clean_pdf_text(pdf_bytes)
-    except Exception as e:
-        reason = f"Error al leer el PDF: {e}"
-        reject_submission(db, submission, reason)
-        reject_event(db, event, reason)
-        db.commit()
-        return False, reason
-
-    # ------------------------------------------------------------------ #
-    # 3. Call Gemini                                                       #
+    # 2. Call Gemini                                                       #
     # ------------------------------------------------------------------ #
     model  = get_model()
     prompt = _build_order_confirmation_prompt()
@@ -255,51 +236,31 @@ def handle_order_confirmation(
     except ValueError as e:
         reason = f"Error al procesar respuesta de IA: {e}"
         log_ai(db, submission.submission_id, "extraction", str(e), None, None, False)
-        reject_submission(db, submission, reason)
-        reject_event(db, event, reason)
-        db.commit()
-        return False, reason
+        return reject_and_return(db, submission, event, reason)
 
     # ------------------------------------------------------------------ #
-    # 4. Validate confidence and required fields                          #
+    # 3. Validate confidence and required fields                          #
     # ------------------------------------------------------------------ #
     confidence       = parsed_dict.get("overall_confidence")
     domicilio        = parsed_dict.get("domicilio_destino")
     motorcycles_data = parsed_dict.get("motorcycles", [])
 
-    log_ai(
-        db,
-        submission.submission_id,
-        "extraction",
-        raw_response,
-        parsed_dict,
-        confidence,
-        confidence is not None and confidence >= CONFIDENCE_THRESHOLD,
+    ok, msg = check_confidence(
+        db, submission, event, confidence,
+        "extraction", raw_response, parsed_dict,
     )
-
-    if confidence is None or confidence < CONFIDENCE_THRESHOLD:
-        reason = f"Confianza insuficiente ({confidence}). Por favor sube un PDF más claro."
-        reject_submission(db, submission, reason)
-        reject_event(db, event, reason)
-        db.commit()
-        return False, reason
+    if not ok: return ok, msg
 
     if not domicilio:
         reason = "No se pudo extraer el domicilio de destino del documento."
-        reject_submission(db, submission, reason)
-        reject_event(db, event, reason)
-        db.commit()
-        return False, reason
+        return reject_and_return(db, submission, event, reason)
 
     if not motorcycles_data:
         reason = "No se encontraron motocicletas en el documento."
-        reject_submission(db, submission, reason)
-        reject_event(db, event, reason)
-        db.commit()
-        return False, reason
+        return reject_and_return(db, submission, event, reason)
 
     # ------------------------------------------------------------------ #
-    # 5. Match domicilio to dealership via ilike                          #
+    # 4. Match domicilio to dealership via ilike                          #
     # ------------------------------------------------------------------ #
     dealership = db.query(Dealership).filter(
         Dealership.address.ilike(f"%{domicilio}%")
@@ -310,88 +271,30 @@ def handle_order_confirmation(
             f"Domicilio '{domicilio}' no encontrado en el sistema. "
             f"Verifica el catálogo de sucursales."
         )
-        reject_submission(db, submission, reason)
-        reject_event(db, event, reason)
-        db.commit()
-        return False, reason
+        return reject_and_return(db, submission, event, reason)
 
     # ------------------------------------------------------------------ #
-    # 6. Validate and auto-correct serie numbers                          #
+    # 5. Validate and auto-correct serie numbers                          #
     # ------------------------------------------------------------------ #
-    remaining_text  = clean_pdf_text
-    serie_corrected = []
-
-    for i, moto in enumerate(motorcycles_data):
-        raw_serie = moto.get("serie", "")
-
-        corrected_serie, status, remaining_text = validate_and_correct_string(
-            gemini_value    = raw_serie,
-            expected_length = SERIE_LENGTH,
-            remaining_text  = remaining_text,
-        )
-
-        if status == "ambiguous":
-            reason = (
-                f"Ambigüedad detectada en número de serie fila {i+1}: "
-                f"'{raw_serie}' coincide con múltiples valores en el documento. "
-                f"Por favor vuelve a subir el PDF."
-            )
-            reject_submission(db, submission, reason)
-            reject_event(db, event, reason)
-            db.commit()
-            return False, reason
-
-        if status == "not_found":
-            reason = (
-                f"Número de serie fila {i+1}: '{raw_serie}' no encontrado "
-                f"en el documento. Por favor verifica el PDF."
-            )
-            reject_submission(db, submission, reason)
-            reject_event(db, event, reason)
-            db.commit()
-            return False, reason
-
-        serie_corrected.append(corrected_serie)
+    serie_corrected, remaining_text, err = validate_string_list(
+        db, submission, event,
+        motorcycles_data, "serie", "serie",
+        SERIE_LENGTH, remaining_text,
+    )
+    if err: return err
 
     # ------------------------------------------------------------------ #
-    # 7. Validate and auto-correct motor numbers                          #
+    # 6. Validate and auto-correct motor numbers                          #
     # ------------------------------------------------------------------ #
-    motor_corrected = []
-
-    for i, moto in enumerate(motorcycles_data):
-        raw_motor = moto.get("motor", "")
-
-        corrected_motor, status, remaining_text = validate_and_correct_string(
-            gemini_value    = raw_motor,
-            expected_length = MOTOR_LENGTH,
-            remaining_text  = remaining_text,
-        )
-
-        if status == "ambiguous":
-            reason = (
-                f"Ambigüedad detectada en número de motor fila {i+1}: "
-                f"'{raw_motor}' coincide con múltiples valores en el documento. "
-                f"Por favor vuelve a subir el PDF."
-            )
-            reject_submission(db, submission, reason)
-            reject_event(db, event, reason)
-            db.commit()
-            return False, reason
-
-        if status == "not_found":
-            reason = (
-                f"Número de motor fila {i+1}: '{raw_motor}' no encontrado "
-                f"en el documento. Por favor verifica el PDF."
-            )
-            reject_submission(db, submission, reason)
-            reject_event(db, event, reason)
-            db.commit()
-            return False, reason
-
-        motor_corrected.append(corrected_motor)
+    motor_corrected, remaining_text, err = validate_string_list(
+        db, submission, event,
+        motorcycles_data, "motor", "motor",
+        MOTOR_LENGTH, remaining_text,
+    )
+    if err: return err
 
     # ------------------------------------------------------------------ #
-    # 8. Build canonical names list from catalog                          #
+    # 7. Build canonical names list from catalog                          #
     # ------------------------------------------------------------------ #
     canonical_names = [
         row.canonical_name
@@ -399,7 +302,7 @@ def handle_order_confirmation(
     ]
 
     # ------------------------------------------------------------------ #
-    # 9. Parse model names                                                #
+    # 8. Parse model names                                                #
     # ------------------------------------------------------------------ #
     parsed_models = []
 
@@ -412,10 +315,7 @@ def handle_order_confirmation(
                 f"No se pudo identificar el modelo en fila {i+1}: "
                 f"'{raw_name}'. Verifica el documento."
             )
-            reject_submission(db, submission, reason)
-            reject_event(db, event, reason)
-            db.commit()
-            return False, reason
+            return reject_and_return(db, submission, event, reason)
 
         parsed_models.append({
             "canonical_name": canonical_name,
@@ -426,7 +326,7 @@ def handle_order_confirmation(
         })
 
     # ------------------------------------------------------------------ #
-    # 10. Look up model_id from motorcycle_catalog                        #
+    # 9. Look up model_id from motorcycle_catalog                         #
     # ------------------------------------------------------------------ #
     resolved_models = []
 
@@ -441,18 +341,12 @@ def handle_order_confirmation(
                 f"Modelo '{parsed['canonical_name']}' año {parsed['year']} "
                 f"no encontrado en el catálogo. Verifica el catálogo de modelos."
             )
-            reject_submission(db, submission, reason)
-            reject_event(db, event, reason)
-            db.commit()
-            return False, reason
+            return reject_and_return(db, submission, event, reason)
 
-        resolved_models.append({
-            **parsed,
-            "model_id": catalog_entry.model_id,
-        })
+        resolved_models.append({**parsed, "model_id": catalog_entry.model_id})
 
     # ------------------------------------------------------------------ #
-    # 11. Create OrderConfirmationDocument row                            #
+    # 10. Create OrderConfirmationDocument row                            #
     # ------------------------------------------------------------------ #
     order_conf_doc = OrderConfirmationDocument(
         submission_id = submission.submission_id,
@@ -463,7 +357,7 @@ def handle_order_confirmation(
     db.flush()
 
     # ------------------------------------------------------------------ #
-    # 12. Match each motorcycle to purchased record or create             #
+    # 11. Match each motorcycle to purchased record or create             #
     #     as not_purchased                                                #
     # ------------------------------------------------------------------ #
     for resolved in resolved_models:
@@ -474,10 +368,10 @@ def handle_order_confirmation(
         )
 
         if existing:
-            existing.status               = MotorcycleStatus.incoming
-            existing.reference_number     = resolved["serie"]
-            existing.motor_number         = resolved["motor"]
-            existing.color                = resolved["color"]
+            existing.status                = MotorcycleStatus.incoming
+            existing.reference_number      = resolved["serie"]
+            existing.motor_number          = resolved["motor"]
+            existing.color                 = resolved["color"]
             existing.order_confirmation_id = order_conf_doc.order_confirmation_document_id
             db.flush()
         else:
@@ -494,17 +388,12 @@ def handle_order_confirmation(
             db.flush()
 
     # ------------------------------------------------------------------ #
-    # 13. Mark submission and event complete                              #
+    # 12. Mark submission and event complete                              #
     # ------------------------------------------------------------------ #
-    submission.status        = SubmissionStatus.complete
-    submission.submitted_at  = datetime.now(timezone.utc)
-    event.status             = EventStatus.complete
-    event.completed_at       = datetime.now(timezone.utc)
-    event.linked_entity_type = "ORDER_CONFIRMATION"
-
-    db.flush()
-    event.linked_entity_id = order_conf_doc.order_confirmation_document_id
-    db.commit()
+    mark_complete(
+        db, submission, event,
+        "ORDER_CONFIRMATION", order_conf_doc.order_confirmation_document_id,
+    )
 
     total = len(resolved_models)
     return True, (

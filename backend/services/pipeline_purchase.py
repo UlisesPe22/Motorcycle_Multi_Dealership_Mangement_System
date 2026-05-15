@@ -1,29 +1,34 @@
 import os
 import shutil
-from datetime import datetime, timezone
-from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from config import STORAGE_ROOT, CONFIDENCE_THRESHOLD, MODELO_CODE_LENGTH 
-from models.event import Event, EventStatus
-from models.submission import Submission, SubmissionStatus
+from config import STORAGE_ROOT, MODELO_CODE_LENGTH
+from models.event import Event
+from models.submission import Submission
 from models.motorcycle import Motorcycle, MotorcycleStatus
 from models.purchase_document import PurchaseDocument
 from models.dealership import Dealership
 from models.motorcycle_model_code import MotorcycleModelCode
+from models.motorcycle_catalog import MotorcycleCatalog
 from services.main_pipeline import (
     get_model,
     call_gemini_pdf,
     log_ai,
-    reject_submission,
-    reject_event,
 )
-from services.image_utils import extract_clean_pdf_text, validate_and_correct_string
-from models.motorcycle_catalog import MotorcycleCatalog
+from services.pipeline_utils import (
+    reject_and_return,
+    check_confidence,
+    load_pdf_with_text,
+    validate_string_list,
+    mark_complete,
+)
+
+
 # ======================================================================== #
 # Prompt                                                                    #
 # ======================================================================== #
+
 def _build_purchase_prompt() -> str:
     return """
 You are a data extraction robot processing a Mexican motorcycle purchase order PDF.
@@ -107,6 +112,7 @@ Skipping wrapped financial lines does NOT lower confidence.
 # ======================================================================== #
 # Pipeline                                                                  #
 # ======================================================================== #
+
 def handle_purchase_order(
     db: Session,
     submission: Submission,
@@ -114,47 +120,28 @@ def handle_purchase_order(
 ) -> tuple[bool, str]:
     """
     Pipeline for purchase_order event.
-    1.  Read PDF bytes from disk.
-    2.  Extract clean PDF text via pdfplumber for validation.
-    3.  Call Gemini for extraction.
-    4.  Validate confidence and required fields.
-    5.  Validate and auto-correct modelo codes against PDF ground truth.
-    6.  Look up catalog entries — hard stop if any code not in DB.
-    7.  Match sucursal to dealership_id.
-    8.  Copy PDF to purchase_documents/raw/.
-    9.  Create PurchaseDocument row.
-    10. Create one Motorcycle row per unit (quantity expansion).
-    11. Mark submission and event complete.
+    1.  Read PDF bytes from disk and extract clean text.
+    2.  Call Gemini for extraction.
+    3.  Validate confidence and required fields.
+    4.  Validate and auto-correct modelo codes against PDF ground truth.
+    5.  Look up catalog entries — hard stop if any code not in DB.
+    6.  Match sucursal to dealership_id.
+    7.  Copy PDF to purchase_documents/raw/.
+    8.  Create PurchaseDocument row.
+    9.  Create one Motorcycle row per unit (quantity expansion).
+    10. Mark submission and event complete.
     """
 
     # ------------------------------------------------------------------ #
-    # 1. Load PDF from disk                                               #
+    # 1. Load PDF from disk and extract clean text                        #
     # ------------------------------------------------------------------ #
-    raw_path = submission.raw_file_path
-    if not raw_path or not os.path.exists(raw_path):
-        reason = "Archivo PDF no encontrado en disco."
-        reject_submission(db, submission, reason)
-        reject_event(db, event, reason)
-        db.commit()
-        return False, reason
-
-    with open(raw_path, "rb") as f:
-        pdf_bytes = f.read()
+    pdf_bytes, remaining_text, err = load_pdf_with_text(
+        db, submission, event, submission.raw_file_path
+    )
+    if err: return err
 
     # ------------------------------------------------------------------ #
-    # 2. Extract clean PDF text for validation                            #
-    # ------------------------------------------------------------------ #
-    try:
-        clean_pdf_text = extract_clean_pdf_text(pdf_bytes)
-    except Exception as e:
-        reason = f"Error al leer el PDF: {e}"
-        reject_submission(db, submission, reason)
-        reject_event(db, event, reason)
-        db.commit()
-        return False, reason
-
-    # ------------------------------------------------------------------ #
-    # 3. Call Gemini                                                       #
+    # 2. Call Gemini                                                       #
     # ------------------------------------------------------------------ #
     model  = get_model()
     prompt = _build_purchase_prompt()
@@ -164,98 +151,54 @@ def handle_purchase_order(
     except ValueError as e:
         reason = f"Error al procesar respuesta de IA: {e}"
         log_ai(db, submission.submission_id, "extraction", str(e), None, None, False)
-        reject_submission(db, submission, reason)
-        reject_event(db, event, reason)
-        db.commit()
-        return False, reason
+        return reject_and_return(db, submission, event, reason)
 
     # ------------------------------------------------------------------ #
-    # 4. Validate confidence and required fields                          #
+    # 3. Validate confidence and required fields                          #
     # ------------------------------------------------------------------ #
     confidence       = parsed_dict.get("overall_confidence")
     sucursal         = parsed_dict.get("sucursal")
     fecha            = parsed_dict.get("fecha_documento")
     motorcycles_data = parsed_dict.get("motorcycles", [])
 
-    log_ai(
-        db,
-        submission.submission_id,
-        "extraction",
-        raw_response,
-        parsed_dict,
-        confidence,
-        confidence is not None and confidence >= CONFIDENCE_THRESHOLD,
+    ok, msg = check_confidence(
+        db, submission, event, confidence,
+        "extraction", raw_response, parsed_dict,
     )
-
-    if confidence is None or confidence < CONFIDENCE_THRESHOLD:
-        reason = f"Confianza insuficiente ({confidence}). Por favor sube un PDF más claro."
-        reject_submission(db, submission, reason)
-        reject_event(db, event, reason)
-        db.commit()
-        return False, reason
+    if not ok: return ok, msg
 
     if not sucursal:
         reason = "No se pudo extraer el campo Sucursal del documento."
-        reject_submission(db, submission, reason)
-        reject_event(db, event, reason)
-        db.commit()
-        return False, reason
+        return reject_and_return(db, submission, event, reason)
 
     if not motorcycles_data:
         reason = "No se encontraron motocicletas en el documento."
-        reject_submission(db, submission, reason)
-        reject_event(db, event, reason)
-        db.commit()
-        return False, reason
+        return reject_and_return(db, submission, event, reason)
 
     # ------------------------------------------------------------------ #
-    # 5. Validate and auto-correct modelo codes against PDF ground truth  #
+    # 4. Validate and auto-correct modelo codes against PDF ground truth  #
     # ------------------------------------------------------------------ #
-    remaining_text = clean_pdf_text
-    corrected_motorcycles = []
+    corrected_codes, remaining_text, err = validate_string_list(
+        db, submission, event,
+        motorcycles_data, "modelo", "código de modelo",
+        MODELO_CODE_LENGTH, remaining_text,
+    )
+    if err: return err
 
-    for moto in motorcycles_data:
-        raw_code = moto.get("modelo", "")
-
-        corrected_code, status, remaining_text = validate_and_correct_string(
-            gemini_value    = raw_code,
-            expected_length = MODELO_CODE_LENGTH,
-            remaining_text  = remaining_text,
-        )
-
-        if status == "ambiguous":
-            reason = (
-                f"Ambigüedad detectada en el código de modelo '{raw_code}'. "
-                f"El código coincide con múltiples valores en el documento. "
-                f"Por favor vuelve a subir el PDF."
-            )
-            reject_submission(db, submission, reason)
-            reject_event(db, event, reason)
-            db.commit()
-            return False, reason
-
-        if status == "not_found":
-            reason = (
-                f"El código de modelo '{raw_code}' no fue encontrado en el documento. "
-                f"Por favor verifica que el PDF es correcto."
-            )
-            reject_submission(db, submission, reason)
-            reject_event(db, event, reason)
-            db.commit()
-            return False, reason
-
-        corrected_motorcycles.append({
-            **moto,
-            "modelo": corrected_code,
-        })
+    corrected_motorcycles = [
+        {**moto, "modelo": code}
+        for moto, code in zip(motorcycles_data, corrected_codes)
+    ]
 
     # ------------------------------------------------------------------ #
-    # 6. Look up catalog entries — hard stop if any code not in DB        #
+    # 5. Look up catalog entries — hard stop if any code not in DB        #
     # ------------------------------------------------------------------ #
     resolved = []
     for moto in corrected_motorcycles:
         code = moto["modelo"]
-        code_entry = db.query(MotorcycleModelCode).filter(MotorcycleModelCode.modelo_code == code).first()
+        code_entry = db.query(MotorcycleModelCode).filter(
+            MotorcycleModelCode.modelo_code == code
+        ).first()
 
         catalog_entry = code_entry.model if code_entry else None
 
@@ -264,18 +207,12 @@ def handle_purchase_order(
                 f"El código '{code}' no existe en el catálogo de modelos. "
                 f"Por favor actualiza el catálogo antes de procesar este pedido."
             )
-            reject_submission(db, submission, reason)
-            reject_event(db, event, reason)
-            db.commit()
-            return False, reason
+            return reject_and_return(db, submission, event, reason)
 
-        resolved.append({
-            **moto,
-            "catalog_entry": catalog_entry,
-        })
+        resolved.append({**moto, "catalog_entry": catalog_entry})
 
     # ------------------------------------------------------------------ #
-    # 7. Match sucursal to dealership                                     #
+    # 6. Match sucursal to dealership                                     #
     # ------------------------------------------------------------------ #
     dealership = db.query(Dealership).filter(
         Dealership.name == sucursal
@@ -286,13 +223,10 @@ def handle_purchase_order(
             f"Sucursal '{sucursal}' no encontrada en el sistema. "
             f"Verifica el catálogo de sucursales."
         )
-        reject_submission(db, submission, reason)
-        reject_event(db, event, reason)
-        db.commit()
-        return False, reason    
+        return reject_and_return(db, submission, event, reason)
 
     # ------------------------------------------------------------------ #
-    # 8. Copy PDF to purchase_documents/raw/                              #
+    # 7. Copy PDF to purchase_documents/raw/                              #
     # ------------------------------------------------------------------ #
     dest_folder = os.path.join(STORAGE_ROOT, "purchase_documents", "raw")
     os.makedirs(dest_folder, exist_ok=True)
@@ -301,16 +235,13 @@ def handle_purchase_order(
     )
 
     try:
-        shutil.copy2(raw_path, dest_path)
+        shutil.copy2(submission.raw_file_path, dest_path)
     except Exception as e:
         reason = f"Error al guardar el archivo: {e}"
-        reject_submission(db, submission, reason)
-        reject_event(db, event, reason)
-        db.commit()
-        return False, reason
+        return reject_and_return(db, submission, event, reason)
 
     # ------------------------------------------------------------------ #
-    # 9. Count total units and create PurchaseDocument row               #
+    # 8. Count total units and create PurchaseDocument row               #
     # ------------------------------------------------------------------ #
     total_units = sum(
         int(m.get("cantidad", 0))
@@ -329,7 +260,7 @@ def handle_purchase_order(
     db.flush()
 
     # ------------------------------------------------------------------ #
-    # 10. Create one Motorcycle row per unit (quantity expansion)         #
+    # 9. Create one Motorcycle row per unit (quantity expansion)          #
     # ------------------------------------------------------------------ #
     for moto in resolved:
         cantidad      = int(moto.get("cantidad", 0))
@@ -344,17 +275,12 @@ def handle_purchase_order(
             db.add(motorcycle)
 
     # ------------------------------------------------------------------ #
-    # 11. Mark submission and event complete                              #
+    # 10. Mark submission and event complete                              #
     # ------------------------------------------------------------------ #
-    submission.status        = SubmissionStatus.complete
-    submission.submitted_at  = datetime.now(timezone.utc)
-    event.status             = EventStatus.complete
-    event.completed_at       = datetime.now(timezone.utc)
-    event.linked_entity_type = "PURCHASE_DOCUMENT"
-
-    db.flush()
-    event.linked_entity_id = purchase_doc.purchase_document_id
-    db.commit()
+    mark_complete(
+        db, submission, event,
+        "PURCHASE_DOCUMENT", purchase_doc.purchase_document_id,
+    )
 
     return True, (
         f"Pedido registrado exitosamente. "

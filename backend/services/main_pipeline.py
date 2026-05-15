@@ -1,33 +1,33 @@
-import os
 import json
-from datetime import datetime, timezone
 from typing import Optional
 
 import google.generativeai as genai
 from sqlalchemy.orm import Session
 
-from config import MODEL_NAME, CONFIDENCE_THRESHOLD
-from models.event import Event, EventType, EventName, EventStatus
-from models.submission import Submission, SubmissionStatus
-from models.ai_analysis_log import AIAnalysisLog
+from models.event import Event, EventType, EventName
+from models.submission import Submission
+
+from services.gemini_client import get_model
+from services.pipeline_utils import log_ai, reject_submission, reject_event
 
 # ======================================================================== #
-# Shared utilities                                                          #
+# Re-export shared helpers so existing imports from main_pipeline work      #
 # ======================================================================== #
+# (pipeline_id_docs, pipeline_purchase, pipeline_order_confirmation, and
+#  pipeline_delivery all import these names from services.main_pipeline)
+__all__ = [
+    "get_model",
+    "call_gemini_image",
+    "call_gemini_pdf",
+    "log_ai",
+    "reject_submission",
+    "reject_event",
+]
 
-def get_model():
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("GEMINI_API_KEY not found in .env")
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel(
-        model_name=MODEL_NAME,
-        generation_config={
-            "response_mime_type": "application/json",
-            "temperature": 0.1,
-        }
-    )
 
+# ======================================================================== #
+# Gemini call wrappers                                                      #
+# ======================================================================== #
 
 def call_gemini_image(model, prompt: str, image_bytes: bytes) -> tuple[str, dict]:
     """
@@ -69,42 +69,6 @@ def call_gemini_pdf(model, prompt: str, pdf_bytes: bytes) -> tuple[str, dict]:
         raise ValueError(f"Gemini returned invalid JSON: {e}\nRaw: {raw}")
 
 
-def log_ai(
-    db: Session,
-    submission_id: int,
-    step_name: str,
-    raw_response: str,
-    parsed_result: Optional[dict],
-    confidence: Optional[float],
-    success: bool,
-):
-    """Write one row to ai_analysis_log."""
-    log = AIAnalysisLog(
-        submission_id=submission_id,
-        step_name=step_name,
-        model_version=MODEL_NAME,
-        raw_response=raw_response,
-        parsed_result=parsed_result,
-        confidence=confidence,
-        success=success,
-    )
-    db.add(log)
-    db.flush()
-    return log
-
-
-def reject_submission(db: Session, submission: Submission, reason: str):
-    submission.status = SubmissionStatus.rejected
-    submission.rejection_reason = reason
-    db.flush()
-
-
-def reject_event(db: Session, event: Event, reason: str):
-    event.status = EventStatus.rejected
-    event.completed_at = datetime.now(timezone.utc)
-    db.flush()
-
-
 # ======================================================================== #
 # Main entry point — routes to correct pipeline by event type              #
 # ======================================================================== #
@@ -137,13 +101,16 @@ def process_upload(db: Session, submission_id: int) -> tuple[bool, str]:
     elif event_type.name == EventName.purchase_order:
         from services.pipeline_purchase import handle_purchase_order
         return handle_purchase_order(db, submission, event)
+
     elif event_type.name == EventName.order_confirmation:
         from services.pipeline_order_confirmation import handle_order_confirmation
         return handle_order_confirmation(db, submission, event)
+
     elif event_type.name == EventName.delivery_confirmation:
         from services.pipeline_delivery import handle_delivery_confirmation
-    # declared_count and dealership_id come from the submission metadata
-    # these will be passed via a dedicated endpoint — placeholder for now
+        # declared_count and dealership_id come from the submission metadata
+        # these will be passed via a dedicated endpoint — placeholder for now
         return False, "Pipeline de entrega requiere endpoint dedicado."
+
     else:
         return False, f"No hay pipeline implementado para {event_type.name.value}"

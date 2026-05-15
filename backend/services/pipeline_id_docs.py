@@ -33,7 +33,7 @@ from schemas.gemini_responses import (
     Phase2FrontResponse,
     Phase2BackResponse,
 )
-from services.image_utils import warp_and_save, load_image_as_pil, pil_to_jpeg_bytes
+from services.pipeline_utils import warp_and_save, load_image_as_pil, pil_to_jpeg_bytes
 
 from services.main_pipeline import (
     get_model,
