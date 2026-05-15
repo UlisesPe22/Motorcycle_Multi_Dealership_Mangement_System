@@ -1,0 +1,26 @@
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
+python-dotenv==1.0.0
+opencv-python-headless==4.8.1.78
+numpy==1.26.2
+easyocr==1.7.1
+passporteye==2.2.0
+scikit-image==0.22.0
+Pillow==10.1.0
+pyzbar==0.1.9
+
+docker exec -it moto_app-postgresql-1 psql -U eskeleton22 -d moto_app -c "
+SELECT
+    m.motorcycle_id        AS id,
+    c.canonical_name       AS model,
+    c.year                 AS year,
+    m.color                AS color,
+    m.status               AS status,
+    m.reference_number     AS serie,
+    m.motor_number         AS motor,
+    d.name                 AS dealership
+FROM motorcycles m
+JOIN motorcycle_catalog c ON m.model_id = c.model_id
+JOIN dealerships d        ON m.dealership_id = d.dealership_id
+ORDER BY m.status, m.motorcycle_id DESC;
+" --pset=border=2 --pset=format=aligned
