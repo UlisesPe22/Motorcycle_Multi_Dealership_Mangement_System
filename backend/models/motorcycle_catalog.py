@@ -29,10 +29,10 @@ class MotorcycleCatalog(Base):
         cascade="all, delete-orphan"
     )
 
-    motorcycles = relationship(
-        "Motorcycle",
-        back_populates="model"
-    )
+    motorcycles      = relationship("Motorcycle",            back_populates="model")
+    reservations     = relationship("Reservation",           back_populates="model")
+    available_colors = relationship("MotorcycleCatalogColor", back_populates="model",
+                                   cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return (

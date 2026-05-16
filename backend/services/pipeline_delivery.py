@@ -389,14 +389,17 @@ def _print_validation_results(results: list[dict]):
         print(f"  Motor:   {r['motor']:<20} → {r['motor_status']}")
 
         if r["match_via"] == "hard_stop":
-            print(f"  Result:  ✗ HARD STOP — ambiguity detected")
+            print(f"  Result:  x HARD STOP — ambiguity detected")
         elif r["match_via"] == "not_found":
-            print(f"  Result:  ⚠ NOT FOUND → not_purchased")
+            print(f"  Result:  ! NOT FOUND -> not_purchased")
         else:
-            print(f"  Result:  ✓ MATCHED via {r['match_via'].upper()} → in_stock")
+            target = "in_stock_reserved" if r.get("was_reserved") else "in_stock"
+            print(f"  Result:  + MATCHED via {r['match_via'].upper()} -> {target}")
+            if r.get("was_reserved"):
+                print(f"  * RESERVADA -> in_stock_reserved")
             if r["serie_status"] not in ("exact", "corrected") or \
                r["motor_status"] not in ("exact", "corrected"):
-                print(f"  ⚠ Discrepancy logged — matched via one field only")
+                print(f"  ! Discrepancy logged — matched via one field only")
 
     print(f"\n{'═' * width}\n")
 
@@ -514,7 +517,10 @@ def handle_delivery_confirmation(
     # ------------------------------------------------------------------ #
     incoming_pool = db.query(Motorcycle).filter(
         Motorcycle.dealership_id == dealership_id,
-        Motorcycle.status        == MotorcycleStatus.incoming,
+        Motorcycle.status.in_([
+            MotorcycleStatus.incoming,
+            MotorcycleStatus.incoming_reserved,
+        ]),
     ).all()
 
     # ------------------------------------------------------------------ #
@@ -540,6 +546,11 @@ def handle_delivery_confirmation(
             model_name = "Desconocido"
             year       = ""
 
+        was_reserved = (
+            matched_moto.status == MotorcycleStatus.incoming_reserved
+            if matched_moto else False
+        )
+
         validation_results.append({
             "row":          i + 1,
             "serie":        serie,
@@ -550,6 +561,7 @@ def handle_delivery_confirmation(
             "model_name":   model_name,
             "year":         year,
             "motorcycle":   matched_moto,
+            "was_reserved": was_reserved,
         })
 
         if match_via == "hard_stop":
@@ -595,7 +607,10 @@ def handle_delivery_confirmation(
             db.add(new_moto)
             db.flush()
         else:
-            matched_moto.status                   = MotorcycleStatus.in_stock
+            if result.get("was_reserved"):
+                matched_moto.status = MotorcycleStatus.in_stock_reserved
+            else:
+                matched_moto.status = MotorcycleStatus.in_stock
             matched_moto.delivery_confirmation_id = submission.submission_id
             db.flush()
 

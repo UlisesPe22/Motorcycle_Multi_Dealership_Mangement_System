@@ -68,11 +68,12 @@ class EventName(str, enum.Enum):
     Mirrors the seeded rows in event_types.name.
     Used in application code so we never compare against bare strings.
     """
-    client_registration   = "client_registration"
-    sale_validation       = "sale_validation"
-    delivery_confirmation = "delivery_confirmation"
-    order_confirmation    = "order_confirmation"
-    purchase_order        = "purchase_order"
+    client_registration      = "client_registration"
+    sale_validation          = "sale_validation"
+    delivery_confirmation    = "delivery_confirmation"
+    order_confirmation       = "order_confirmation"
+    purchase_order           = "purchase_order"
+    motorcycle_reservation   = "motorcycle_reservation"
 
 
 class SlotName(str, enum.Enum):

@@ -8,7 +8,8 @@ from models.user                  import User, UserRole
 from models.event                 import EventType, EventSlotDefinition, EventName, SlotName
 from models.dealership            import Dealership
 from models.motorcycle_catalog    import MotorcycleCatalog
-from models.motorcycle_model_code import MotorcycleModelCode
+from models.motorcycle_model_code    import MotorcycleModelCode
+from models.motorcycle_catalog_color import MotorcycleCatalogColor, MotorcycleColor
 
 
 def seed_users(db):
@@ -230,6 +231,65 @@ def seed_motorcycle_model_codes(db):
     print(f"  ✓ Inserted {len(codes)} motorcycle model codes.")
 
 
+def seed_motorcycle_catalog_colors(db):
+    if db.query(MotorcycleCatalogColor).count() > 0:
+        print("  -> motorcycle_catalog_colors already seeded, skipping.")
+        return
+
+    def get_catalog_id(canonical_name: str, year: str) -> int:
+        row = db.query(MotorcycleCatalog).filter(
+            MotorcycleCatalog.canonical_name == canonical_name,
+            MotorcycleCatalog.year           == year,
+        ).first()
+        if not row:
+            raise RuntimeError(f"Catalog entry '{canonical_name}' {year} not found.")
+        return row.model_id
+
+    color_map = [
+        ("Pulsar N125 FI-CBS",  "2026", [MotorcycleColor.Purpura, MotorcycleColor.Citrus,  MotorcycleColor.Rojo]),
+        ("Pulsar N125 Car",     "2026", [MotorcycleColor.Citrus,  MotorcycleColor.Purpura]),
+        ("Pulsar N160",         "2026", [MotorcycleColor.Perla,   MotorcycleColor.Azul]),
+        ("Pulsar N160 Premium", "2026", [MotorcycleColor.Rojo,    MotorcycleColor.Azul,    MotorcycleColor.Negro]),
+        ("Pulsar N250 FI ABS",  "2026", [MotorcycleColor.Perla,   MotorcycleColor.Rojo,    MotorcycleColor.Negro]),
+        ("Dominar 250",         "2026", [MotorcycleColor.Negro,   MotorcycleColor.Rojo]),
+        ("Dominar 400 UG",      "2026", [MotorcycleColor.Negro]),
+        ("Pulsar NS200",        "2026", [MotorcycleColor.Negro,   MotorcycleColor.Rojo]),
+        ("Pulsar RS200",        "2025", [MotorcycleColor.Perla]),
+        ("Pulsar NS400Z",       "2025", [MotorcycleColor.Gris,    MotorcycleColor.Rojo]),
+    ]
+
+    entries = []
+    for canonical_name, year, colors in color_map:
+        model_id = get_catalog_id(canonical_name, year)
+        for color in colors:
+            entries.append(MotorcycleCatalogColor(model_id=model_id, color=color))
+
+    db.add_all(entries)
+    db.commit()
+    print(f"  ✓ Inserted {len(entries)} motorcycle catalog color entries.")
+
+
+def seed_motorcycle_reservation_event_type(db):
+    """
+    Idempotent — adds motorcycle_reservation event type if it doesn't
+    already exist. Safe to call even when the DB was seeded before this
+    event type was introduced.
+    """
+    existing = db.query(EventType).filter(
+        EventType.name == EventName.motorcycle_reservation
+    ).first()
+    if existing:
+        print("  → motorcycle_reservation event type already seeded, skipping.")
+        return
+    db.add(EventType(
+        name           = EventName.motorcycle_reservation,
+        required_slots = 0,
+        description    = "Reservación de motocicleta por cliente",
+    ))
+    db.commit()
+    print("  ✓ Inserted motorcycle_reservation event type.")
+
+
 def run_seed():
     db = SessionLocal()
     try:
@@ -240,6 +300,8 @@ def run_seed():
         seed_slot_definitions(db)
         seed_motorcycle_catalog(db)
         seed_motorcycle_model_codes(db)
+        seed_motorcycle_catalog_colors(db)
+        seed_motorcycle_reservation_event_type(db)
         print("\nSeed complete.\n")
     finally:
         db.close()

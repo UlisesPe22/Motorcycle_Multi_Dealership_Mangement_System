@@ -21,6 +21,8 @@ from services.pipeline_utils import (
     load_pdf_with_text,
     validate_string_list,
     mark_complete,
+    _auto_assign_reservations,
+    _print_reservation_assignment_results,
 )
 
 
@@ -358,8 +360,10 @@ def handle_order_confirmation(
 
     # ------------------------------------------------------------------ #
     # 11. Match each motorcycle to purchased record or create             #
-    #     as not_purchased                                                #
+    #     as incoming                                                     #
     # ------------------------------------------------------------------ #
+    newly_incoming = []
+
     for resolved in resolved_models:
         existing = _find_matching_purchased_motorcycle(
             db,
@@ -374,6 +378,7 @@ def handle_order_confirmation(
             existing.color                 = resolved["color"]
             existing.order_confirmation_id = order_conf_doc.order_confirmation_document_id
             db.flush()
+            newly_incoming.append(existing)
         else:
             new_moto = Motorcycle(
                 model_id               = resolved["model_id"],
@@ -382,10 +387,20 @@ def handle_order_confirmation(
                 motor_number           = resolved["motor"],
                 color                  = resolved["color"],
                 order_confirmation_id  = order_conf_doc.order_confirmation_document_id,
-                status                 = MotorcycleStatus.not_purchased,
+                status                 = MotorcycleStatus.incoming,
             )
             db.add(new_moto)
             db.flush()
+            newly_incoming.append(new_moto)
+
+    # ------------------------------------------------------------------ #
+    # 11b. Auto-assign reservations (Trigger B)                           #
+    # ------------------------------------------------------------------ #
+    if newly_incoming:
+        assignment_results = _auto_assign_reservations(
+            db, dealership.dealership_id, newly_incoming
+        )
+        _print_reservation_assignment_results(assignment_results)
 
     # ------------------------------------------------------------------ #
     # 12. Mark submission and event complete                              #

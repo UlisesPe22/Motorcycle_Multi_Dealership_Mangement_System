@@ -23,9 +23,12 @@ from models.motorcycle_catalog          import MotorcycleCatalog                
 from models.motorcycle_model_code       import MotorcycleModelCode                  # noqa
 from models.purchase_document           import PurchaseDocument                      # noqa
 from models.order_confirmation_document import OrderConfirmationDocument             # noqa
+from models.motorcycle_catalog_color    import MotorcycleCatalogColor               # noqa
+from models.reservation                 import Reservation, ReservationStatus        # noqa
+from models.reservation_color           import ReservationColor                      # noqa
 from models.motorcycle                  import Motorcycle                            # noqa
 
-from routers import events, submissions, clients, delivery_confirmations, motorcycles
+from routers import events, submissions, clients, delivery_confirmations, motorcycles, reservations
 
 # Create tables if they don't exist yet
 Base.metadata.create_all(bind=engine)
@@ -49,6 +52,7 @@ app.include_router(submissions.router)
 app.include_router(clients.router)
 app.include_router(delivery_confirmations.router)
 app.include_router(motorcycles.router)
+app.include_router(reservations.router)
 
 
 @app.get("/")

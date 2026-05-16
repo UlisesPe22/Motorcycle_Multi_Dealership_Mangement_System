@@ -384,6 +384,120 @@ def validate_string_list(
     return corrected, remaining_text, None
 
 
+def _auto_assign_reservations(
+    db: Session,
+    dealership_id: int,
+    incoming_pool: list,
+) -> list[dict]:
+    """
+    Tries to assign active reservations to a pool of newly-incoming motorcycles.
+    Processes reservations oldest-first. For each reservation, filters pool by
+    model then attempts color preferences in priority order (case-insensitive).
+    On a match: sets moto.status=incoming_reserved, moto.reservation_id,
+    reservation.status=assigned, flushes. Returns list of result dicts.
+    """
+    from models.reservation import Reservation, ReservationStatus
+    from models.reservation_color import ReservationColor
+    from models.motorcycle import MotorcycleStatus
+
+    active_reservations = (
+        db.query(Reservation)
+        .filter(
+            Reservation.dealership_id == dealership_id,
+            Reservation.status        == ReservationStatus.active,
+        )
+        .order_by(Reservation.created_at.asc())
+        .all()
+    )
+
+    assigned_moto_ids = set()
+    results = []
+
+    for reservation in active_reservations:
+        model_pool = [
+            m for m in incoming_pool
+            if m.model_id == reservation.model_id
+            and m.motorcycle_id not in assigned_moto_ids
+        ]
+
+        if not model_pool:
+            client_name = reservation.client.nombre_completo if reservation.client else "?"
+            results.append({
+                "reservation_id": reservation.reservation_id,
+                "client":         client_name,
+                "model":          reservation.model.canonical_name if reservation.model else "?",
+                "colors":         [rc.color.value for rc in reservation.colors],
+                "result":         "NO_MODEL_MATCH",
+                "moto_id":        None,
+                "color":          None,
+            })
+            continue
+
+        color_preferences = [rc.color.strip().lower() for rc in reservation.colors]
+        matched_moto = None
+        matched_color = None
+
+        for preferred_color in color_preferences:
+            for moto in model_pool:
+                if moto.color and moto.color.lower() == preferred_color:
+                    matched_moto  = moto
+                    matched_color = moto.color
+                    break
+            if matched_moto:
+                break
+
+        client_name = reservation.client.nombre_completo if reservation.client else "?"
+        model_name  = reservation.model.canonical_name  if reservation.model  else "?"
+
+        if matched_moto:
+            matched_moto.status         = MotorcycleStatus.incoming_reserved
+            matched_moto.reservation_id = reservation.reservation_id
+            reservation.status          = ReservationStatus.assigned
+            assigned_moto_ids.add(matched_moto.motorcycle_id)
+            db.flush()
+            results.append({
+                "reservation_id": reservation.reservation_id,
+                "client":         client_name,
+                "model":          model_name,
+                "colors":         [rc.color.value for rc in reservation.colors],
+                "result":         "ASSIGNED",
+                "moto_id":        matched_moto.motorcycle_id,
+                "color":          matched_color,
+            })
+        else:
+            results.append({
+                "reservation_id": reservation.reservation_id,
+                "client":         client_name,
+                "model":          model_name,
+                "colors":         [rc.color.value for rc in reservation.colors],
+                "result":         "NO_COLOR_MATCH",
+                "moto_id":        None,
+                "color":          None,
+            })
+
+    return results
+
+
+def _print_reservation_assignment_results(results: list[dict]) -> None:
+    if not results:
+        return
+    width = 72
+    print(f"\n{'=' * width}")
+    print(f"  RESERVATION AUTO-ASSIGNMENT RESULTS")
+    print(f"{'=' * width}")
+    for r in results:
+        icon   = "* " if r["result"] == "ASSIGNED" else "x "
+        colors = ", ".join(r["colors"]) if r["colors"] else "sin preferencia"
+        print(f"\n  {icon}Reservacion #{r['reservation_id']} — {r['client']}")
+        print(f"    Modelo:   {r['model']}")
+        print(f"    Colores:  {colors}")
+        if r["result"] == "ASSIGNED":
+            print(f"    Resultado: ASIGNADA -> moto #{r['moto_id']} ({r['color']})")
+        else:
+            print(f"    Resultado: {r['result']}")
+    print(f"\n{'=' * width}\n")
+
+
 def mark_complete(
     db: Session,
     submission: Submission,

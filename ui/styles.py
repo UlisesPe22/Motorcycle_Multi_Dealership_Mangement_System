@@ -372,5 +372,17 @@ div[data-baseweb="select"] {
 
 /* ── Divider ──────────────────────────────────────────────────────────────── */
 hr { border: none; border-top: 1px solid #E8ECF0; margin: 1.25rem 0; }
+
+/* ── Selectbox width constraint + dropdown scroll ─────────────────────────── */
+div[data-testid="stSelectbox"] {
+    max-width: 100%;
+}
+div[data-testid="stSelectbox"] > div[data-baseweb="select"] {
+    max-width: 100%;
+}
+div[data-baseweb="popover"] ul {
+    max-height: 220px;
+    overflow-y: auto;
+}
 </style>
 """, unsafe_allow_html=True)

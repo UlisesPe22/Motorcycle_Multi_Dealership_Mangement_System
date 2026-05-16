@@ -15,6 +15,9 @@ from models.motorcycle_catalog          import MotorcycleCatalog                
 from models.motorcycle_model_code       import MotorcycleModelCode                  # noqa: F401
 from models.purchase_document           import PurchaseDocument                      # noqa: F401
 from models.order_confirmation_document import OrderConfirmationDocument             # noqa: F401
+from models.motorcycle_catalog_color    import MotorcycleCatalogColor               # noqa: F401
+from models.reservation                 import Reservation, ReservationStatus        # noqa: F401
+from models.reservation_color           import ReservationColor                      # noqa: F401
 from models.motorcycle                  import Motorcycle                            # noqa: F401
 
 

@@ -6,13 +6,15 @@ from database import Base
 
 
 class MotorcycleStatus(str, enum.Enum):
-    purchased     = "purchased"
-    incoming      = "incoming"
-    in_stock      = "in_stock"
-    not_purchased = "not_purchased"
-    rejected      = "rejected"
-    sold          = "sold"
-    cancelled     = "cancelled"
+    purchased          = "purchased"
+    incoming           = "incoming"
+    in_stock           = "in_stock"
+    not_purchased      = "not_purchased"
+    rejected           = "rejected"
+    sold               = "sold"
+    cancelled          = "cancelled"
+    incoming_reserved  = "incoming_reserved"
+    in_stock_reserved  = "in_stock_reserved"
 
 
 class Motorcycle(Base):
@@ -55,6 +57,13 @@ class Motorcycle(Base):
     created_at               = Column(DateTime, server_default=func.now(), nullable=False)
 
     # ------------------------------------------------------------------ #
+    # Reservation link — nullable until a reservation is assigned         #
+    # ------------------------------------------------------------------ #
+    reservation_id = Column(Integer, ForeignKey("reservations.reservation_id"), nullable=True)
+
+    # ------------------------------------------------------------------ #
     # Relationships                                                        #
     # ------------------------------------------------------------------ #
-    model = relationship("MotorcycleCatalog", back_populates="motorcycles")
+    model       = relationship("MotorcycleCatalog", back_populates="motorcycles")
+    reservation = relationship("Reservation", back_populates="motorcycle",
+                               foreign_keys=[reservation_id])

@@ -6,24 +6,30 @@ from ui.components import page_header
 from ui.pages.delivery import _fetch_dealerships
 
 _STATUS_ES = {
-    "purchased":     "Comprada",
-    "incoming":      "En camino",
-    "in_stock":      "En stock",
-    "not_purchased": "No comprada",
-    "rejected":      "Rechazada",
-    "sold":          "Vendida",
-    "cancelled":     "Cancelada",
+    "purchased":         "Comprada",
+    "incoming":          "En camino",
+    "in_stock":          "En stock",
+    "not_purchased":     "No comprada",
+    "rejected":          "Rechazada",
+    "sold":              "Vendida",
+    "cancelled":         "Cancelada",
+    "incoming_reserved": "En camino (Reservada)",
+    "in_stock_reserved": "En stock (Reservada)",
 }
 
 _STATUS_BADGE = {
-    "purchased":     ("#DBEAFE", "#1D4ED8"),
-    "incoming":      ("#FEF3C7", "#92400E"),
-    "in_stock":      ("#DCFCE7", "#15803D"),
-    "not_purchased": ("#F1F5F9", "#64748B"),
-    "rejected":      ("#FEE2E2", "#DC2626"),
-    "sold":          ("#CCFBF1", "#0D9488"),
-    "cancelled":     ("#F1F5F9", "#94A3B8"),
+    "purchased":         ("#DBEAFE", "#1D4ED8"),
+    "incoming":          ("#FEF3C7", "#92400E"),
+    "in_stock":          ("#DCFCE7", "#15803D"),
+    "not_purchased":     ("#F1F5F9", "#64748B"),
+    "rejected":          ("#FEE2E2", "#DC2626"),
+    "sold":              ("#CCFBF1", "#0D9488"),
+    "cancelled":         ("#F1F5F9", "#94A3B8"),
+    "incoming_reserved": ("#FEF3C7", "#92400E"),
+    "in_stock_reserved": ("#DCFCE7", "#15803D"),
 }
+
+_RESERVED_STATUSES = {"incoming_reserved", "in_stock_reserved"}
 
 
 def _v(val):
@@ -35,6 +41,8 @@ def _v(val):
 def _badge(raw: str) -> str:
     bg, fg = _STATUS_BADGE.get(raw, ("#F1F5F9", "#64748B"))
     label  = _STATUS_ES.get(raw, raw or "—")
+    if raw in _RESERVED_STATUSES:
+        label = f"⭐ {label}"
     return (
         f'<span style="background:{bg};color:{fg};font-size:0.67rem;font-weight:600;'
         f'padding:0.18rem 0.55rem;border-radius:20px;white-space:nowrap;'
@@ -73,13 +81,29 @@ def page_main():
 
     all_data = st.session_state.moto_all_data
 
-    dealerships  = _fetch_dealerships()
-    suc_options  = ["Todas"] + [d["name"] for d in dealerships]
-    raw_statuses = sorted({m.get("status", "") for m in all_data if m.get("status")})
-    est_options  = ["Todos"] + [_STATUS_ES.get(s, s) for s in raw_statuses]
+    dealerships = _fetch_dealerships()
+    suc_options = ["Todas"] + [d["name"] for d in dealerships]
+    est_options = [
+        "Todos",
+        "Comprada",
+        "En camino",
+        "En stock",
+        "No comprada",
+        "Rechazada",
+        "Vendida",
+        "Cancelada",
+        "En camino (Reservada)",
+        "En stock (Reservada)",
+    ]
+    ALL_MODELS  = [
+        "Dominar 250", "Dominar 400 UG", "Pulsar N125 Car",
+        "Pulsar N125 FI CBS", "Pulsar N160", "Pulsar N160 Premium",
+        "Pulsar N250 FI ABS", "Pulsar NS200", "Pulsar NS400Z", "Pulsar RS200",
+    ]
+    mod_options = ["Todos"] + ALL_MODELS
 
     st.markdown('<div class="bi-card" style="padding:1rem 1.75rem 1.1rem;">', unsafe_allow_html=True)
-    f1, f2, f3 = st.columns([2, 2, 1])
+    f1, f2, f3, f4 = st.columns([2, 2, 2, 1])
     with f1:
         st.markdown('<div class="card-section">Estado</div>', unsafe_allow_html=True)
         sel_estado = st.selectbox(
@@ -90,6 +114,15 @@ def page_main():
             on_change=_on_filter_change,
         )
     with f2:
+        st.markdown('<div class="card-section">Modelo</div>', unsafe_allow_html=True)
+        sel_modelo = st.selectbox(
+            "Modelo",
+            options=mod_options,
+            key="moto_filter_modelo",
+            label_visibility="collapsed",
+            on_change=_on_filter_change,
+        )
+    with f3:
         st.markdown('<div class="card-section">Sucursal</div>', unsafe_allow_html=True)
         sel_sucursal = st.selectbox(
             "Sucursal",
@@ -98,7 +131,7 @@ def page_main():
             label_visibility="collapsed",
             on_change=_on_filter_change,
         )
-    with f3:
+    with f4:
         st.markdown('<div style="margin-top:1.45rem;"></div>', unsafe_allow_html=True)
         if st.button("Buscar", key="btn_buscar_moto", type="primary"):
             st.session_state.moto_page     = 0
@@ -115,6 +148,9 @@ def page_main():
         raw_key = _ES_TO_RAW.get(sel_estado)
         if raw_key:
             filtered = [m for m in filtered if m.get("status") == raw_key]
+
+    if sel_modelo != "Todos":
+        filtered = [m for m in filtered if m.get("model") == sel_modelo]
 
     if sel_sucursal != "Todas":
         filtered = [m for m in filtered if m.get("dealership") == sel_sucursal]

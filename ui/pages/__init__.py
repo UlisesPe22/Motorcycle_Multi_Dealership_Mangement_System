@@ -17,6 +17,9 @@ def route(page: str):
     elif page == "delivery_confirmation":
         from ui.pages.delivery import page_delivery_confirmation
         page_delivery_confirmation()
+    elif page == "reservation":
+        from ui.pages.reservation import page_reservation
+        page_reservation()
     elif page == "sale_validation":
         from ui.pages.placeholders import page_placeholder
         page_placeholder("Validar Venta", "sale_validation")

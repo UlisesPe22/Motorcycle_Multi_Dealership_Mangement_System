@@ -8,6 +8,7 @@ NAV_ITEMS = [
     ("order_registration",    "Orden de Compra"),
     ("order_confirmation",    "Orden de Traslado"),
     ("delivery_confirmation", "Registrar Entrega"),
+    ("reservation",           "Registrar Reservación"),
     ("sale_validation",       "Validar Venta",      True),
     ("employee_registration", "Registrar Empleado", True),
 ]
@@ -19,6 +20,7 @@ _NAV_MAIN = [
     ("order_registration",    "≡",  "Orden de Compra"),
     ("order_confirmation",    "▷",  "Orden de Traslado"),
     ("delivery_confirmation", "✔",  "Registrar Entrega"),
+    ("reservation",           "◈",  "Registrar Reservación"),
 ]
 
 _NAV_SOON = [
@@ -34,6 +36,10 @@ def _clear_all_pipeline_state():
         "purchase_ran", "purchase_success", "purchase_message",
         "order_conf_ran", "order_conf_success", "order_conf_message", "order_conf_confidence",
         "delivery_ran", "delivery_success", "delivery_message", "delivery_confidence",
+        "moto_filter_modelo",
+        "reservation_ran", "reservation_success", "reservation_message", "reservation_assigned",
+        "reservation_dealership", "reservation_client", "reservation_model",
+        "reservation_colors", "reservation_amount",
     ]
     for k in keys_to_clear:
         st.session_state.pop(k, None)
