@@ -12,3 +12,5 @@ from models.motorcycle_catalog_color    import MotorcycleCatalogColor, Motorcycl
 from models.reservation                 import Reservation, ReservationStatus                # noqa: F401
 from models.reservation_color           import ReservationColor                              # noqa: F401
 from models.motorcycle                  import Motorcycle, MotorcycleStatus                  # noqa: F401
+from models.credit_institution          import CreditInstitution                              # noqa: F401
+from models.contract                    import Contract, SaleType, PaymentMethod              # noqa: F401

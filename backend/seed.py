@@ -10,6 +10,7 @@ from models.dealership            import Dealership
 from models.motorcycle_catalog    import MotorcycleCatalog
 from models.motorcycle_model_code    import MotorcycleModelCode
 from models.motorcycle_catalog_color import MotorcycleCatalogColor, MotorcycleColor
+from models.credit_institution       import CreditInstitution
 
 
 def seed_users(db):
@@ -33,17 +34,26 @@ def seed_dealerships(db):
 
     dealerships = [
         Dealership(
-            name    = "BAJAJ VIA MORELOS",
-            address = "VIA MORELOS 126 #126 COL. SAN JOSE JAJALPA ECATEPEC DE MORELOS C.P. 55090"
+            name            = "BAJAJ VIA MORELOS",
+            address         = "VIA MORELOS 126 #126 COL. SAN JOSE JAJALPA ECATEPEC DE MORELOS C.P. 55090",
+            name_contract   = "Via Morelos",
+            city_contract   = "Vía Morelos, Estado de México",
+            contract_prefix = "VMOR",
         ),
         Dealership(
-            name    = "BAJAJ IGNACIO ZARAGOZA",
-            address = "AV. IGNACIO ZARAGOZA #1660 Col. JUAN ESCUTIA IZTAPALAPA C.P. 09100"
+            name            = "BAJAJ IGNACIO ZARAGOZA",
+            address         = "AV. IGNACIO ZARAGOZA #1660 Col. JUAN ESCUTIA IZTAPALAPA C.P. 09100",
+            name_contract   = "Ignacio Zaragoza",
+            city_contract   = "Ignacio Zaragoza, CDMX",
+            contract_prefix = "IGZA",
         ),
         Dealership(
-            name    = "BAJAJ TLALPIZAHUAC",
-            address = "AVENIDA CUAUHTEMOC #4 Col. SANTA CRUZ TLALPIZAHUAC IXTAPALUCA C.P. 56577"
-        ), 
+            name            = "BAJAJ TLALPIZAHUAC",
+            address         = "AVENIDA CUAUHTEMOC #4 Col. SANTA CRUZ TLALPIZAHUAC IXTAPALUCA C.P. 56577",
+            name_contract   = "Tlalpizahuac",
+            city_contract   = "Tlalpizahuac, Estado de México",
+            contract_prefix = "IXT",
+        ),
     ]
     db.add_all(dealerships)
     db.commit()
@@ -152,18 +162,18 @@ def seed_motorcycle_catalog(db):
     # ------------------------------------------------------------------ #
     catalog_entries = [
         # 2026 models
-        MotorcycleCatalog(canonical_name="Pulsar N125 FI-CBS",  year="2026", full_price=None),
-        MotorcycleCatalog(canonical_name="Pulsar N125 Car",     year="2026", full_price=None),
-        MotorcycleCatalog(canonical_name="Pulsar N160",         year="2026", full_price=None),
-        MotorcycleCatalog(canonical_name="Pulsar N160 Premium", year="2026", full_price=None),
-        MotorcycleCatalog(canonical_name="Pulsar N250 FI ABS",  year="2026", full_price=None),
-        MotorcycleCatalog(canonical_name="Dominar 250",         year="2026", full_price=None),
-        MotorcycleCatalog(canonical_name="Dominar 400 UG",      year="2026", full_price=None),
-        MotorcycleCatalog(canonical_name="Pulsar NS200",        year="2026", full_price=None),
+        MotorcycleCatalog(canonical_name="Pulsar N125 FI-CBS",  year="2026", full_price=38999.00, discount_price=37499.00),
+        MotorcycleCatalog(canonical_name="Pulsar N125 Car",     year="2026", full_price=33999.00, discount_price=33999.00),
+        MotorcycleCatalog(canonical_name="Pulsar N160",         year="2026", full_price=37099.00, discount_price=37099.00),
+        MotorcycleCatalog(canonical_name="Pulsar N160 Premium", year="2026", full_price=57499.00, discount_price=53999.00),
+        MotorcycleCatalog(canonical_name="Pulsar N250 FI ABS",  year="2026", full_price=69999.01, discount_price=66499.01),
+        MotorcycleCatalog(canonical_name="Dominar 250",         year="2026", full_price=73499.00, discount_price=71499.00),
+        MotorcycleCatalog(canonical_name="Dominar 400 UG",      year="2026", full_price=95999.00, discount_price=93999.00),
+        MotorcycleCatalog(canonical_name="Pulsar NS200",        year="2026", full_price=62999.00, discount_price=57999.00),
 
         # 2025 models
-        MotorcycleCatalog(canonical_name="Pulsar RS200",        year="2025", full_price=None),
-        MotorcycleCatalog(canonical_name="Pulsar NS400Z",       year="2025", full_price=None),
+        MotorcycleCatalog(canonical_name="Pulsar RS200",        year="2025", full_price=72499.00, discount_price=66499.00),
+        MotorcycleCatalog(canonical_name="Pulsar NS400Z",       year="2025", full_price=90999.00, discount_price=86499.00),
     ]
     db.add_all(catalog_entries)
     db.commit()
@@ -269,6 +279,19 @@ def seed_motorcycle_catalog_colors(db):
     print(f"  ✓ Inserted {len(entries)} motorcycle catalog color entries.")
 
 
+def seed_credit_institutions(db):
+    if db.query(CreditInstitution).count() > 0:
+        print("  → credit_institutions already seeded, skipping.")
+        return
+
+    db.add_all([
+        CreditInstitution(name="ANM"),
+        CreditInstitution(name="Maxicash"),
+    ])
+    db.commit()
+    print("  ✓ Inserted 2 credit institutions.")
+
+
 def seed_motorcycle_reservation_event_type(db):
     """
     Idempotent — adds motorcycle_reservation event type if it doesn't
@@ -296,6 +319,7 @@ def run_seed():
         print("\nSeeding database...")
         seed_users(db)
         seed_dealerships(db)
+        seed_credit_institutions(db)
         seed_event_types(db)
         seed_slot_definitions(db)
         seed_motorcycle_catalog(db)

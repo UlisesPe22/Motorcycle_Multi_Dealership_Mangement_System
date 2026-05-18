@@ -18,7 +18,8 @@ class MotorcycleCatalog(Base):
     model_id       = Column(Integer, primary_key=True, autoincrement=True)
     canonical_name = Column(String, nullable=False)
     year           = Column(String, nullable=False)
-    full_price     = Column(Float, nullable=True)   # nullable until seeded with real prices
+    full_price     = Column(Float, nullable=False)
+    discount_price = Column(Float, nullable=False)
 
     # ------------------------------------------------------------------ #
     # Relationships                                                        #

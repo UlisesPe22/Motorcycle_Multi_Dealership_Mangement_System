@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(..venvScriptspython -c ' *)"
+      "Bash(..venvScriptspython -c ' *)",
+      "Bash(docker exec *)",
+      "Bash(venv\\\\Scripts\\\\python.exe create_tables.py)",
+      "Bash(python create_tables.py)"
     ]
   }
 }

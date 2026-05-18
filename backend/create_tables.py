@@ -19,6 +19,8 @@ from models.motorcycle_catalog_color    import MotorcycleCatalogColor           
 from models.reservation                 import Reservation, ReservationStatus        # noqa: F401
 from models.reservation_color           import ReservationColor                      # noqa: F401
 from models.motorcycle                  import Motorcycle                            # noqa: F401
+from models.credit_institution          import CreditInstitution                      # noqa: F401
+from models.contract                    import Contract                               # noqa: F401
 
 
 def create_all_tables():

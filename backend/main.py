@@ -27,6 +27,8 @@ from models.motorcycle_catalog_color    import MotorcycleCatalogColor           
 from models.reservation                 import Reservation, ReservationStatus        # noqa
 from models.reservation_color           import ReservationColor                      # noqa
 from models.motorcycle                  import Motorcycle                            # noqa
+from models.credit_institution          import CreditInstitution                      # noqa
+from models.contract                    import Contract                               # noqa
 
 from routers import events, submissions, clients, delivery_confirmations, motorcycles, reservations
 
