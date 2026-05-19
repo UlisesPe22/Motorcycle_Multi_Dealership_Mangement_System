@@ -1,3 +1,6 @@
+import streamlit as st
+
+
 def route(page: str):
     if page == "main":
         from ui.pages.dashboard import page_main
@@ -21,8 +24,8 @@ def route(page: str):
         from ui.pages.reservation import page_reservation
         page_reservation()
     elif page == "sale_validation":
-        from ui.pages.placeholders import page_placeholder
-        page_placeholder("Validar Venta", "sale_validation")
+        from ui.pages.sale import page_sale
+        page_sale()
     elif page == "employee_registration":
         from ui.pages.placeholders import page_placeholder
         page_placeholder("Registrar Empleado", "employee_registration")

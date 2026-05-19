@@ -30,7 +30,7 @@ from models.motorcycle                  import Motorcycle                       
 from models.credit_institution          import CreditInstitution                      # noqa
 from models.contract                    import Contract                               # noqa
 
-from routers import events, submissions, clients, delivery_confirmations, motorcycles, reservations
+from routers import events, submissions, clients, delivery_confirmations, motorcycles, reservations, sales
 
 # Create tables if they don't exist yet
 Base.metadata.create_all(bind=engine)
@@ -55,6 +55,7 @@ app.include_router(clients.router)
 app.include_router(delivery_confirmations.router)
 app.include_router(motorcycles.router)
 app.include_router(reservations.router)
+app.include_router(sales.router)
 
 
 @app.get("/")

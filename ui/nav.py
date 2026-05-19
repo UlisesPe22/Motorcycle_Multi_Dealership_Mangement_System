@@ -9,7 +9,7 @@ NAV_ITEMS = [
     ("order_confirmation",    "Orden de Traslado"),
     ("delivery_confirmation", "Registrar Entrega"),
     ("reservation",           "Registrar Reservación"),
-    ("sale_validation",       "Validar Venta",      True),
+    ("sale_validation",       "Iniciar Venta"),
     ("employee_registration", "Registrar Empleado", True),
 ]
 
@@ -21,10 +21,10 @@ _NAV_MAIN = [
     ("order_confirmation",    "▷",  "Orden de Traslado"),
     ("delivery_confirmation", "✔",  "Registrar Entrega"),
     ("reservation",           "◈",  "Registrar Reservación"),
+    ("sale_validation",       "◇",  "Iniciar Venta"),
 ]
 
 _NAV_SOON = [
-    ("sale_validation",       "◇",  "Validar Venta"),
     ("employee_registration", "◈",  "Registrar Empleado"),
 ]
 
@@ -40,6 +40,14 @@ def _clear_all_pipeline_state():
         "reservation_ran", "reservation_success", "reservation_message", "reservation_assigned",
         "reservation_dealership", "reservation_client", "reservation_model",
         "reservation_colors", "reservation_amount",
+        "sale_ran", "sale_success", "sale_message",
+        "sale_contract_id", "sale_contract_number", "sale_has_solicitud",
+        "sale_client", "sale_motorcycle", "sale_sale_type",
+        "sale_payment_method", "sale_downpayment", "sale_institution",
+        "sale_payment_bank", "sale_reference_name", "sale_reference_phone",
+        "sale_reference_relation", "sale_buyer_colonia", "sale_buyer_cp",
+        "sale_buyer_municipio", "sale_buyer_estado",
+        "sale_motos_data",
     ]
     for k in keys_to_clear:
         st.session_state.pop(k, None)

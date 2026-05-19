@@ -9,7 +9,7 @@ DATABASE_URL = (
     f"postgresql+psycopg://"
     f"{os.getenv('POSTGRES_USER', 'eskeleton22')}:"
     f"{os.getenv('POSTGRES_PASSWORD', 'ulises22')}@"
-    f"127.0.0.1:"
+    f"{os.getenv('POSTGRES_HOST', '127.0.0.1')}:"
     f"{os.getenv('POSTGRES_PORT', '5433')}/"
     f"{os.getenv('POSTGRES_DB', 'moto_app')}"
 )

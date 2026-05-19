@@ -1,8 +1,10 @@
 import json
 from typing import Optional
 
-import google.generativeai as genai
+from google.genai import types
 from sqlalchemy.orm import Session
+
+from config import MODEL_NAME
 
 from models.event import Event, EventType, EventName
 from models.submission import Submission
@@ -35,8 +37,12 @@ def call_gemini_image(model, prompt: str, image_bytes: bytes) -> tuple[str, dict
     Returns (raw_response_str, parsed_dict).
     Raises ValueError on malformed JSON.
     """
-    image_part = {"mime_type": "image/jpeg", "data": image_bytes}
-    response = model.generate_content([prompt, image_part])
+    part = types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+    response = model.models.generate_content(
+        model=MODEL_NAME,
+        contents=[prompt, part],
+        config={"response_mime_type": "application/json", "temperature": 0.1},
+    )
     raw = response.text.strip()
 
     if raw.startswith("```"):
@@ -55,8 +61,12 @@ def call_gemini_pdf(model, prompt: str, pdf_bytes: bytes) -> tuple[str, dict]:
     Returns (raw_response_str, parsed_dict).
     Raises ValueError on malformed JSON.
     """
-    pdf_part = {"mime_type": "application/pdf", "data": pdf_bytes}
-    response = model.generate_content([prompt, pdf_part])
+    part = types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
+    response = model.models.generate_content(
+        model=MODEL_NAME,
+        contents=[prompt, part],
+        config={"response_mime_type": "application/json", "temperature": 0.1},
+    )
     raw = response.text.strip()
 
     if raw.startswith("```"):
