@@ -21,6 +21,7 @@ __all__ = [
     "get_model",
     "call_gemini_image",
     "call_gemini_pdf",
+    "call_gemini_text",
     "log_ai",
     "reject_submission",
     "reject_event",
@@ -43,6 +44,45 @@ def call_gemini_image(model, prompt: str, image_bytes: bytes) -> tuple[str, dict
         contents=[prompt, part],
         config={"response_mime_type": "application/json", "temperature": 0.1},
     )
+
+    usage = response.usage_metadata
+    print(
+        f"[GEMINI TOKENS] input={usage.prompt_token_count} | "
+        f"output={usage.candidates_token_count} | "
+        f"total={usage.total_token_count}"
+    )
+
+    raw = response.text.strip()
+
+    if raw.startswith("```"):
+        lines = raw.split("\n")
+        raw = "\n".join(lines[1:-1])
+
+    try:
+        return raw, json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Gemini returned invalid JSON: {e}\nRaw: {raw}")
+
+
+def call_gemini_text(model, prompt: str, text: str) -> tuple[str, dict]:
+    """
+    Call Gemini with a prompt and plain text extracted from a PDF.
+    Returns (raw_response_str, parsed_dict).
+    Raises ValueError on malformed JSON.
+    """
+    response = model.models.generate_content(
+        model=MODEL_NAME,
+        contents=[prompt, text],
+        config={"response_mime_type": "application/json", "temperature": 0.1},
+    )
+
+    usage = response.usage_metadata
+    print(
+        f"[GEMINI TOKENS] input={usage.prompt_token_count} | "
+        f"output={usage.candidates_token_count} | "
+        f"total={usage.total_token_count}"
+    )
+
     raw = response.text.strip()
 
     if raw.startswith("```"):
@@ -67,6 +107,14 @@ def call_gemini_pdf(model, prompt: str, pdf_bytes: bytes) -> tuple[str, dict]:
         contents=[prompt, part],
         config={"response_mime_type": "application/json", "temperature": 0.1},
     )
+
+    usage = response.usage_metadata
+    print(
+        f"[GEMINI TOKENS] input={usage.prompt_token_count} | "
+        f"output={usage.candidates_token_count} | "
+        f"total={usage.total_token_count}"
+    )
+
     raw = response.text.strip()
 
     if raw.startswith("```"):

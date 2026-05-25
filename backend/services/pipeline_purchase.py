@@ -10,81 +10,87 @@ from models.motorcycle import Motorcycle, MotorcycleStatus
 from models.purchase_document import PurchaseDocument
 from models.dealership import Dealership
 from models.motorcycle_model_code import MotorcycleModelCode
-from models.motorcycle_catalog import MotorcycleCatalog
 from services.main_pipeline import (
     get_model,
-    call_gemini_pdf,
+    call_gemini_text,
     log_ai,
 )
 from services.pipeline_utils import (
     reject_and_return,
     check_confidence,
     load_pdf_with_text,
+    extract_raw_pdf_text,
     validate_string_list,
     mark_complete,
 )
-
-
 # ======================================================================== #
 # Prompt                                                                    #
 # ======================================================================== #
-
 def _build_purchase_prompt() -> str:
     return """
-You are a data extraction robot processing a Mexican motorcycle purchase order PDF.
-The document is in Spanish.
+You are a data extraction robot processing the plain text of a Mexican motorcycle
+purchase order (Orden de Compra de Vehículos). The text was extracted from a PDF
+using pdfplumber and is provided at the end of these instructions.
 Return ONLY a valid JSON object. No explanation, no markdown, no text outside the JSON.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 1 — EXTRACT HEADER
+STEP 1 — EXTRACT HEADER FIELDS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Find these two fields in the document header area (top of the page):
+Find these two fields in the header lines at the top of the text:
 
-- "sucursal": the value that appears on the same line as the word "Sucursal".
-  Copy it exactly as written.
+- "sucursal": the value that appears after "Sucursal :" on the same line.
+  That line also contains "Nombre del documento :" followed by a document code.
+  Extract ONLY the dealership name — stop before "Nombre del documento".
+  Example: from "Sucursal : BAJAJ TLALPIZAHUAC Nombre del documento : VPOC000..."
+  extract only "BAJAJ TLALPIZAHUAC"
 
-- "fecha_documento": the date that appears on the same line as
-  "Fecha del Documento". Format it as DD/MM/YY.
-  Example: if the document says "30-03-2026" output "30/03/26"
+- "fecha_documento": the date that appears after "Fecha del documento :" on the
+  same line. That line also contains "No. de Referencia :".
+  Format the date as DD/MM/YY.
+  Example: "29-04-2026" → "29/04/26"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 2 — EXTRACT MOTORCYCLE ROWS
+STEP 2 — EXTRACT MOTORCYCLE TABLE ROWS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-The table has many columns. You must extract ONLY two values per row:
-the Modelo code and the Cantidad. Everything else must be ignored.
+Each valid data row in the table follows this pattern on a single line:
+<row_number> <MODELO_CODE> <model name words> <CANTIDAD> <financial data>
 
-HOW TO IDENTIFY A VALID DATA ROW:
-A valid row always contains a Modelo code. A Modelo code has these properties:
+You must extract ONLY two values per row: the MODELO code and the CANTIDAD.
+
+HOW TO IDENTIFY THE MODELO CODE:
+- It is the first token after the row number
 - It is a single continuous string with NO spaces
 - It contains only letters (A-Z), numbers (0-9), and hyphens (-)
-- It ALWAYS ends with exactly two digits followed by the letters "DI"
-- Examples of valid Modelo codes: "P125N-PU26DI", "D250UGNE26DI", "P160CAPE26DI"
-- If a string does not end in [two digits + DI] it is NOT a Modelo code
+- It ALWAYS ends with exactly two digits followed by "DI"
+- Examples: "P125NCCI26DI", "D400UGNE26DI", "P250N-PE26DI", "P160NPRO26DI"
+- If a token does not end in [two digits + DI] it is NOT a modelo code
 
-HOW TO EXTRACT CANTIDAD FOR EACH ROW:
-- Cantidad always appears as a decimal number written as X.00
-  Examples: 1.00, 2.00, 3.00
-- It is always a small number between 1 and 20
-- It is the FIRST standalone X.00 decimal that appears after the Modelo code
-  on the same line
-- Convert it to integer: 1.00 becomes 1, 3.00 becomes 3
-- WARNING: numbers like "125", "160", "250", "26", "25" that appear inside
-  the Modelo code or elsewhere are NOT cantidad — ignore them
+HOW TO IDENTIFY CANTIDAD:
+- It is the first number written as exactly X.00 (two decimal zeros) after the
+  MODELO code on the same line
+- Examples of valid cantidad: 1.00, 2.00, 3.00
+- Convert to integer: 1.00 → 1, 3.00 → 3
+- WARNING: prices like 24,913.06 or 3,986.09 contain non-zero decimals and
+  commas — they are NOT cantidad and must be completely ignored
+- WARNING: the number 0.00 is a discount or tax field, not cantidad — skip it
+- The cantidad is always a small whole number between 1 and 20
 
 LINES TO SKIP COMPLETELY:
-- Any line that contains ONLY numbers, decimals, commas, and spaces with no letters
-  Example: "103,527.46 14,279.65" — SKIP THIS, it is wrapped financial data
-- Any line that does not contain a Modelo code pattern ending in [digits]DI
-- Header lines with column titles
-- Footer lines with totals or signatures
+- Any line that does not contain a MODELO code ending in [digits]DI
+- Lines containing only numbers, decimals, or commas with no letters
+  Example: "11,489.5" or "4" — these are financial overflow lines, skip them
+- The header line: "S. NO. Modelo Nombre del Modelo Cantidad Descuento..."
+- The header line: "Precio Cantidad" or "Unitario Cancelada"
+- Footer lines: "TOTAL AMOUNT", "Importe en Palabras", "Firma", "Printed On",
+  "Por ANAYELI", "THANKS FOR DOING"
 
 EXTRACTION PROCESS — repeat for every valid row:
-1. Find the next Modelo code (ends in [digits]DI, no spaces)
-2. Extract it exactly as written
-3. Find the first X.00 decimal after it on the same line
-4. Convert to integer and extract as cantidad
-5. Skip everything else on that line
-6. Move to the next Modelo code
+1. Find the next line that contains a MODELO code (ends in [digits]DI, no spaces)
+2. Extract the MODELO code exactly as written
+3. Find the first X.00 value after the code — this is cantidad
+4. Convert cantidad to integer
+5. Skip all other values on that line
+6. Move to the next line containing a MODELO code
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OUTPUT FORMAT
@@ -103,11 +109,15 @@ Return this exact JSON and nothing else:
 }
 
 overall_confidence: float between 0.0 and 1.0.
-Reflects how clearly you could read the header fields and all Modelo codes.
-Set below 0.75 ONLY if a header field is missing or a Modelo code is unreadable.
-Skipping wrapped financial lines does NOT lower confidence.
-"""
+Since you are reading clean extracted text, confidence should be high when
+all rows and header fields are clearly identifiable.
+Set below 0.75 ONLY if the sucursal field is missing or any modelo code
+cannot be identified with certainty.
+Lines containing only numbers that appear between data rows are financial
+overflow lines and should NOT lower your confidence.
 
+DOCUMENT TEXT:
+"""
 
 # ======================================================================== #
 # Pipeline                                                                  #
@@ -140,6 +150,8 @@ def handle_purchase_order(
     )
     if err: return err
 
+    raw_text = extract_raw_pdf_text(pdf_bytes)
+
     # ------------------------------------------------------------------ #
     # 2. Call Gemini                                                       #
     # ------------------------------------------------------------------ #
@@ -147,7 +159,7 @@ def handle_purchase_order(
     prompt = _build_purchase_prompt()
 
     try:
-        raw_response, parsed_dict = call_gemini_pdf(model, prompt, pdf_bytes)
+        raw_response, parsed_dict = call_gemini_text(model, prompt, raw_text)
     except ValueError as e:
         reason = f"Error al procesar respuesta de IA: {e}"
         log_ai(db, submission.submission_id, "extraction", str(e), None, None, False)
@@ -160,6 +172,8 @@ def handle_purchase_order(
     sucursal         = parsed_dict.get("sucursal")
     fecha            = parsed_dict.get("fecha_documento")
     motorcycles_data = parsed_dict.get("motorcycles", [])
+
+    print(f"[GEMINI CONFIDENCE] {confidence}")
 
     ok, msg = check_confidence(
         db, submission, event, confidence,

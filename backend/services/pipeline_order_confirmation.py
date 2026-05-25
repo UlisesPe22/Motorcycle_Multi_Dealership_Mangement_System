@@ -12,13 +12,14 @@ from models.order_confirmation_document import OrderConfirmationDocument
 from models.dealership import Dealership
 from services.main_pipeline import (
     get_model,
-    call_gemini_pdf,
+    call_gemini_text,
     log_ai,
 )
 from services.pipeline_utils import (
     reject_and_return,
     check_confidence,
     load_pdf_with_text,
+    extract_raw_pdf_text,
     validate_string_list,
     mark_complete,
     _auto_assign_reservations,
@@ -29,79 +30,93 @@ from services.pipeline_utils import (
 # ======================================================================== #
 # Prompt                                                                    #
 # ======================================================================== #
-
 def _build_order_confirmation_prompt() -> str:
     return """
-You are a data extraction robot processing a Mexican motorcycle transfer notice PDF (Aviso de Traslado).
-The document is in Spanish.
+You are a data extraction robot processing the plain text of a Mexican motorcycle
+transfer notice (Aviso de Traslado). The text was extracted from a PDF using
+pdfplumber and is provided at the end of these instructions.
 Return ONLY a valid JSON object. No explanation, no markdown, no text outside the JSON.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 1 — EXTRACT FOOTER FIELD
+STEP 1 — EXTRACT DESTINATION ADDRESS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Find this field in the BOTTOM LEFT area of the page in a labeled section:
+The destination address appears in the lower portion of the text, split across
+multiple lines due to the multi-column layout of the original document.
 
-- "domicilio_destino": the value that appears next to or below the label
-  "Domicilio del destino:".
-  This is a street address. Copy it exactly as written including street name,
-  number, colony, city and postal code if present.
+RULES FOR FINDING THE ADDRESS:
+- Look for a line that contains a street address starting with words like
+  "AVENIDA", "AV.", "CALZ", "CALLE", "VIA", "BLVD" followed by a street name
+  and number. This is the first line of the destination address.
+- The address may continue on the following line with a colony name starting
+  with "Col." or "COL." and/or a city name and postal code "C.P. XXXXX"
+- The word "Domicilio" appears near this address but on a separate line mixed
+  with other column text — do not rely on it as a label prefix
+- Collect all address parts: street, colony, city, and postal code if present
+- Concatenate them into a single string separated by spaces
+
+Example of what you will find in the text:
+  "AVENIDA CALZ IGNACIO ZARAGOZA #396"        ← street line
+  "Col. FEDERAL VENUSTIANO CARRANZA"           ← colony line (may be on same or next line)
+  "C.P. 15700"                                 ← postal code (may be on same or next line)
+
+Output as: "AVENIDA CALZ IGNACIO ZARAGOZA #396 Col. FEDERAL VENUSTIANO CARRANZA C.P. 15700"
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 STEP 2 — EXTRACT MOTORCYCLE TABLE ROWS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-The table has these columns: NO., MODELO(S)/VERSION(ES), AÑO(S),
-NO. DE MOTOR, NO. DE SERIE, MES DE REPORTE, VALOR DECLARADO, EXTENSION PLAN PISO.
+Each valid data row in the table follows this exact pattern on a single line:
+<row_number> <modelo_version words> <4-digit year> <NO.MOTOR> <NO.SERIE> <price> <NA>
 
 You must extract ONLY three values per row:
 MODELO(S)/VERSION(ES), NO. DE MOTOR, and NO. DE SERIE.
 Everything else must be ignored.
 
 HOW TO IDENTIFY A VALID DATA ROW:
-- Every valid row starts with a small sequential integer row number (1, 2, 3...)
-- Followed immediately by the model name in MODELO(S)/VERSION(ES) column
-- If a line does not start with a sequential row number it is NOT a valid data row
+- Every valid row starts with a small sequential integer (1, 2, 3...)
+- Followed immediately by a multi-word model name
+- If a line does not start with a sequential integer it is NOT a valid data row
 
 HOW TO EXTRACT MODELO(S)/VERSION(ES):
-- This is the second column, immediately after the row number
-- It always contains multiple words with spaces
-- Format is always: "<canonical model name> <color> <two digit year>"
+- It is all the words between the row number and the 4-digit year (e.g. 2026)
+- Format is always: "<model name> <color> <two digit year suffix>"
 - Examples: "Dominar 400 UG Negro 26", "Pulsar N125 Car Citrus 26",
   "Pulsar N160 Premium Azul 26", "Pulsar N250 FI ABS Perla 26"
-- Copy the full value exactly as written including color and year suffix
-- Stop when you reach the AÑO(S) column which contains a 4-digit year like "2026"
+- Copy it exactly including the color and the two-digit year suffix
+- STOP before the 4-digit year column value (e.g. stop before "2026")
 
 HOW TO EXTRACT NO. DE MOTOR:
-- This is the fourth column
-- It is always a short alphanumeric string with NO spaces
-- It contains only letters and numbers, no hyphens
+- It is the first token after the 4-digit year on the same line
 - It is always exactly 11 characters long
+- It contains only letters and numbers, no spaces, no hyphens
 - Examples: "JFXCSJ73242", "JZXWSJ53394", "PDXCSB82014"
 - Copy it exactly as written
 
 HOW TO EXTRACT NO. DE SERIE:
-- This is the fifth column
-- It is always a longer alphanumeric string with NO spaces
-- It contains only letters and numbers, no hyphens
+- It is the second token after the 4-digit year on the same line
+  (immediately after NO. DE MOTOR)
 - It is always exactly 17 characters long
+- It contains only letters and numbers, no spaces, no hyphens
 - Examples: "MD2A67MX3TCJ01162", "MD2C19BX3TWJ51564", "MD2B54DX7TCB00881"
 - Copy it exactly as written
-- WARNING: NO. DE SERIE and NO. DE MOTOR are different values in different columns.
-  NO. DE MOTOR is shorter (11 chars), NO. DE SERIE is longer (17 chars).
-  Never swap them.
+- WARNING: NO. DE MOTOR (11 chars) and NO. DE SERIE (17 chars) are different.
+  Count characters if unsure — 11 means motor, 17 means serie. Never swap them.
 
 LINES TO SKIP COMPLETELY:
 - Any line that does not start with a sequential row number
-- Header lines containing column titles
-- Footer lines containing totals, addresses, signatures, dates, or labels
-- Any line containing only numbers, decimals, or financial data
+- The header line containing: "NO. MODELO(S)/VERSION(ES) AÑO(S) NO. DE MOTOR..."
+- Lines containing only column label fragments: "MES DE", "REPORTE", "DECLARADO"
+- Footer lines: "Tipo de traslado", "Responsable", "Domicilio", "Nombre del",
+  "Empresa", "Licencia", "Medidas de", "Basado en", "saldo a favor"
+- Any line containing only numbers, decimals, or the word "NA"
 
 EXTRACTION PROCESS — repeat for every valid row:
 1. Find the next line starting with a sequential row number
-2. Extract the full MODELO(S)/VERSION(ES) value — everything between the
-   row number and the 4-digit year in AÑO(S) column
-3. Extract NO. DE MOTOR — the 11-character alphanumeric string
-4. Extract NO. DE SERIE — the 17-character alphanumeric string
-5. Skip everything else on that line
-6. Move to the next row number
+2. Extract modelo_version — all words between row number and the 4-digit year
+3. Skip the 4-digit year value
+4. Extract the next 11-character token as motor
+5. Extract the next 17-character token as serie
+6. Skip price and NA at end of line
+7. Move to the next row number
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OUTPUT FORMAT
@@ -120,10 +135,13 @@ Return this exact JSON and nothing else:
 }
 
 overall_confidence: float between 0.0 and 1.0.
-Reflects how clearly you could read the domicilio field and all table rows.
-Set below 0.75 ONLY if the domicilio is missing or any motor/serie value is unreadable.
-"""
+Since you are reading clean extracted text, confidence should be high if all
+rows and the address are clearly identifiable.
+Set below 0.75 ONLY if the address is missing or any motor/serie value cannot
+be determined with certainty.
 
+DOCUMENT TEXT:
+"""
 
 # ======================================================================== #
 # Helpers                                                                   #
@@ -227,6 +245,8 @@ def handle_order_confirmation(
     )
     if err: return err
 
+    raw_text = extract_raw_pdf_text(pdf_bytes)
+
     # ------------------------------------------------------------------ #
     # 2. Call Gemini                                                       #
     # ------------------------------------------------------------------ #
@@ -234,7 +254,7 @@ def handle_order_confirmation(
     prompt = _build_order_confirmation_prompt()
 
     try:
-        raw_response, parsed_dict = call_gemini_pdf(model, prompt, pdf_bytes)
+        raw_response, parsed_dict = call_gemini_text(model, prompt, raw_text)
     except ValueError as e:
         reason = f"Error al procesar respuesta de IA: {e}"
         log_ai(db, submission.submission_id, "extraction", str(e), None, None, False)
@@ -246,6 +266,8 @@ def handle_order_confirmation(
     confidence       = parsed_dict.get("overall_confidence")
     domicilio        = parsed_dict.get("domicilio_destino")
     motorcycles_data = parsed_dict.get("motorcycles", [])
+
+    print(f"[GEMINI CONFIDENCE] {confidence}")
 
     ok, msg = check_confidence(
         db, submission, event, confidence,

@@ -18,7 +18,7 @@ from services.main_pipeline import (
 from services.pipeline_utils import (
     load_image_as_pil,
     pil_to_jpeg_bytes,
-    _levenshtein,
+    _hamming,
     reject_and_return,
     check_confidence,
     mark_complete,
@@ -279,7 +279,7 @@ def _autocorrect_against_pool(
 
     candidates = [
         p for p in pool
-        if len(p) == expected_length and _levenshtein(clean, p.upper()) == 1
+        if len(p) == expected_length and _hamming(clean, p.upper()) == 1
     ]
 
     if len(candidates) == 1:

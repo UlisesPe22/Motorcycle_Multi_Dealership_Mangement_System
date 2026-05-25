@@ -137,6 +137,23 @@ def warp_and_save(
 # PDF text extraction and string validation                                 #
 # ======================================================================== #
 
+def extract_raw_pdf_text(pdf_bytes: bytes) -> str:
+    """
+    Extracts all text from PDF bytes using pdfplumber, preserving spaces
+    and line breaks so Gemini can read the document as structured text.
+    Returns the concatenated text of all pages separated by newlines.
+    """
+    import pdfplumber
+
+    pages = []
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text()
+            if text:
+                pages.append(text)
+    return "\n".join(pages)
+
+
 def extract_clean_pdf_text(pdf_bytes: bytes) -> str:
     """
     Extracts all text from PDF bytes using pdfplumber.
@@ -155,15 +172,22 @@ def extract_clean_pdf_text(pdf_bytes: bytes) -> str:
     return full_text.replace(" ", "").replace("\n", "").replace("\r", "").upper()
 
 
-def _levenshtein(s1: str, s2: str) -> int:
+#def _levenshtein(s1: str, s2: str) -> int:
     """
     Returns character-level edit distance between two equal-length strings.
     For strings of different length returns the absolute length difference.
     """
-    if len(s1) != len(s2):
-        return abs(len(s1) - len(s2))
-    return sum(c1 != c2 for c1, c2 in zip(s1, s2))
+ #   if len(s1) != len(s2):
+#        return abs(len(s1) - len(s2))
+ #   return sum(c1 != c2 for c1, c2 in zip(s1, s2))
 
+def _hamming(s1: str, s2: str) -> int:
+    """
+    Returns the number of character substitutions between two equal-length strings.
+    """
+    if len(s1) != len(s2):
+        raise ValueError("Hamming distance requires equal-length strings.")
+    return sum(c1 != c2 for c1, c2 in zip(s1, s2))
 
 def validate_and_correct_string(
     gemini_value: str,
@@ -193,7 +217,7 @@ def validate_and_correct_string(
     candidates = set()
     for i in range(len(remaining_text) - expected_length + 1):
         substring = remaining_text[i:i + expected_length]
-        if _levenshtein(clean_value, substring) == 1:
+        if _hamming(clean_value, substring) == 1:
             candidates.add(substring)
 
     if len(candidates) == 1:
@@ -365,6 +389,10 @@ def validate_string_list(
             gemini_value    = raw_value,
             expected_length = expected_length,
             remaining_text  = remaining_text,
+        )
+        print(
+            f"[VALIDATE] {field_label} row {i + 1}: "
+            f"'{raw_value}' → '{corrected_value}' [{status}]"
         )
         if status == "ambiguous":
             reason = (
