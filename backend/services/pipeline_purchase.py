@@ -3,7 +3,7 @@ import shutil
 
 from sqlalchemy.orm import Session
 
-from config import STORAGE_ROOT, MODELO_CODE_LENGTH
+from config import STORAGE_ROOT
 from models.event import Event
 from models.submission import Submission
 from models.motorcycle import Motorcycle, MotorcycleStatus
@@ -18,9 +18,9 @@ from services.main_pipeline import (
 from services.pipeline_utils import (
     reject_and_return,
     check_confidence,
-    load_pdf_with_text,
     extract_raw_pdf_text,
-    validate_string_list,
+    is_valid_modelo_code,
+    is_valid_cantidad,
     mark_complete,
 )
 # ======================================================================== #
@@ -130,10 +130,10 @@ def handle_purchase_order(
 ) -> tuple[bool, str]:
     """
     Pipeline for purchase_order event.
-    1.  Read PDF bytes from disk and extract clean text.
+    1.  Load PDF bytes from disk.
     2.  Call Gemini for extraction.
     3.  Validate confidence and required fields.
-    4.  Validate and auto-correct modelo codes against PDF ground truth.
+    4.  Structural validation of extracted modelo codes and cantidades.
     5.  Look up catalog entries — hard stop if any code not in DB.
     6.  Match sucursal to dealership_id.
     7.  Copy PDF to purchase_documents/raw/.
@@ -143,12 +143,13 @@ def handle_purchase_order(
     """
 
     # ------------------------------------------------------------------ #
-    # 1. Load PDF from disk and extract clean text                        #
+    # 1. Load PDF bytes from disk                                         #
     # ------------------------------------------------------------------ #
-    pdf_bytes, remaining_text, err = load_pdf_with_text(
-        db, submission, event, submission.raw_file_path
-    )
-    if err: return err
+    if not submission.raw_file_path or not os.path.exists(submission.raw_file_path):
+        return reject_and_return(db, submission, event, "Archivo PDF no encontrado en disco.")
+
+    with open(submission.raw_file_path, "rb") as f:
+        pdf_bytes = f.read()
 
     raw_text = extract_raw_pdf_text(pdf_bytes)
 
@@ -190,25 +191,30 @@ def handle_purchase_order(
         return reject_and_return(db, submission, event, reason)
 
     # ------------------------------------------------------------------ #
-    # 4. Validate and auto-correct modelo codes against PDF ground truth  #
+    # 4. Structural validation of extracted modelo codes and cantidades   #
     # ------------------------------------------------------------------ #
-    corrected_codes, remaining_text, err = validate_string_list(
-        db, submission, event,
-        motorcycles_data, "modelo", "código de modelo",
-        MODELO_CODE_LENGTH, remaining_text,
-    )
-    if err: return err
-
-    corrected_motorcycles = [
-        {**moto, "modelo": code}
-        for moto, code in zip(motorcycles_data, corrected_codes)
-    ]
+    for i, moto in enumerate(motorcycles_data):
+        code     = moto.get("modelo", "")
+        cantidad = moto.get("cantidad")
+        if not is_valid_modelo_code(code):
+            reason = (
+                f"Fila {i + 1}: el código de modelo '{code}' no tiene el formato "
+                f"esperado. Debe tener exactamente 12 caracteres, contener solo "
+                f"letras, números y guiones, y terminar en dos dígitos seguidos de 'DI'."
+            )
+            return reject_and_return(db, submission, event, reason)
+        if not is_valid_cantidad(cantidad):
+            reason = (
+                f"Fila {i + 1}: la cantidad '{cantidad}' no es válida. "
+                f"Debe ser un número entero entre 1 y 99."
+            )
+            return reject_and_return(db, submission, event, reason)
 
     # ------------------------------------------------------------------ #
     # 5. Look up catalog entries — hard stop if any code not in DB        #
     # ------------------------------------------------------------------ #
     resolved = []
-    for moto in corrected_motorcycles:
+    for moto in motorcycles_data:
         code = moto["modelo"]
         code_entry = db.query(MotorcycleModelCode).filter(
             MotorcycleModelCode.modelo_code == code

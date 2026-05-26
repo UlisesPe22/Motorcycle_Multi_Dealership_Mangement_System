@@ -4,11 +4,12 @@ pipeline_utils.py — Shared utilities for all pipeline services.
 Covers image processing, PDF text extraction, string validation,
 AI logging, submission/event state transitions, and reusable pipeline
 building blocks (reject_and_return, check_confidence, load_pdf_with_text,
-validate_string_list, mark_complete).
+validate_and_correct_string, mark_complete).
 """
 
 import io
 import os
+import re
 import cv2
 import numpy as np
 from PIL import Image
@@ -244,6 +245,52 @@ def validate_and_correct_string(
 
 
 # ======================================================================== #
+# Structural regex validators                                               #
+# ======================================================================== #
+
+def is_valid_modelo_code(code: str) -> bool:
+    """
+    Modelo codes must be:
+    - Exactly 12 characters total
+    - Contain only letters (A-Z), numbers (0-9), and hyphens (-)
+    - Always end in exactly two digits followed by DI
+    - Examples: P160CAPE26DI, P250N-PE26DI, D400UGNE26DI
+    """
+    cleaned = code.strip().upper()
+    return (
+        len(cleaned) == 12
+        and bool(re.match(r'^[A-Z0-9\-]{8}[0-9]{2}DI$', cleaned))
+    )
+
+
+def is_valid_cantidad(cantidad) -> bool:
+    """
+    Cantidad must be a positive integer between 1 and 99 inclusive.
+    """
+    return isinstance(cantidad, int) and 1 <= cantidad <= 99
+
+
+def is_valid_serie(serie: str) -> bool:
+    """
+    NO. DE SERIE must be:
+    - Exactly 17 characters
+    - Only letters (A-Z) and numbers (0-9)
+    - No spaces, hyphens, dots, or special characters
+    """
+    return bool(re.match(r'^[A-Z0-9]{17}$', serie.strip().upper()))
+
+
+def is_valid_motor(motor: str) -> bool:
+    """
+    NO. DE MOTOR must be:
+    - Exactly 11 characters
+    - Only letters (A-Z) and numbers (0-9)
+    - No spaces, hyphens, dots, or special characters
+    """
+    return bool(re.match(r'^[A-Z0-9]{11}$', motor.strip().upper()))
+
+
+# ======================================================================== #
 # AI logging and submission/event state helpers                             #
 # ======================================================================== #
 
@@ -368,61 +415,6 @@ def load_pdf_with_text(
         reason = f"Error al extraer texto del PDF: {e}"
         return None, None, reject_and_return(db, submission, event, reason)
     return pdf_bytes, clean_text, None
-
-
-def validate_string_list(
-    db: Session,
-    submission: Submission,
-    event: Event,
-    items: list[dict],
-    field_key: str,
-    field_label: str,
-    expected_length: int,
-    remaining_text: str,
-) -> tuple[Optional[list[str]], Optional[str], Optional[tuple]]:
-    """
-    Validates and autocorrects a list of strings extracted by Gemini
-    against the PDF ground truth text using validate_and_correct_string().
-    Consumes matched values from the pool on each iteration.
-
-    field_key   — the dict key to read from each item e.g. "serie", "motor", "modelo"
-    field_label — Spanish label for error messages e.g. "serie", "motor", "código"
-
-    Returns (corrected_list, updated_remaining_text, None) on success.
-    Returns (None, None, (False, reason)) on any ambiguous or not_found result.
-
-    Example usage:
-        series, remaining_text, err = validate_string_list(...)
-        if err: return err
-    """
-    corrected = []
-    for i, item in enumerate(items):
-        raw_value = item.get(field_key, "")
-        corrected_value, status, remaining_text = validate_and_correct_string(
-            gemini_value    = raw_value,
-            expected_length = expected_length,
-            remaining_text  = remaining_text,
-        )
-        print(
-            f"[VALIDATE] {field_label} row {i + 1}: "
-            f"'{raw_value}' → '{corrected_value}' [{status}]"
-        )
-        if status == "ambiguous":
-            reason = (
-                f"Ambigüedad detectada en número de {field_label} "
-                f"fila {i + 1}: '{raw_value}' coincide con múltiples "
-                f"valores en el documento. Por favor vuelve a subir el PDF."
-            )
-            return None, None, reject_and_return(db, submission, event, reason)
-        if status == "not_found":
-            reason = (
-                f"Número de {field_label} fila {i + 1}: '{raw_value}' "
-                f"no encontrado en el documento. "
-                f"Por favor verifica el PDF."
-            )
-            return None, None, reject_and_return(db, submission, event, reason)
-        corrected.append(corrected_value)
-    return corrected, remaining_text, None
 
 
 def _auto_assign_reservations(

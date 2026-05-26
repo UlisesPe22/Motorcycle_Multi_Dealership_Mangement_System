@@ -3,7 +3,6 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from config import SERIE_LENGTH, MOTOR_LENGTH
 from models.event import Event
 from models.submission import Submission
 from models.motorcycle import Motorcycle, MotorcycleStatus
@@ -18,9 +17,9 @@ from services.main_pipeline import (
 from services.pipeline_utils import (
     reject_and_return,
     check_confidence,
-    load_pdf_with_text,
     extract_raw_pdf_text,
-    validate_string_list,
+    is_valid_serie,
+    is_valid_motor,
     mark_complete,
     _auto_assign_reservations,
     _print_reservation_assignment_results,
@@ -223,27 +222,28 @@ def handle_order_confirmation(
 ) -> tuple[bool, str]:
     """
     Pipeline for order_confirmation event.
-    1.  Load PDF from disk and extract clean text.
+    1.  Load PDF bytes from disk.
     2.  Call Gemini for extraction.
     3.  Validate confidence and required fields.
     4.  Match domicilio to dealership via ilike.
-    5.  Validate and auto-correct serie numbers against PDF ground truth.
-    6.  Validate and auto-correct motor numbers against PDF ground truth.
-    7.  Build canonical names list from catalog.
-    8.  Parse model names — extract canonical name, color, year.
-    9.  Look up model_id from motorcycle_catalog — hard stop if not found.
-    10. Create OrderConfirmationDocument row.
-    11. Match each motorcycle to purchased record or create as not_purchased.
+    5.  Structural validation of extracted serie and motor numbers.
+    6.  Build canonical names list from catalog.
+    7.  Parse model names — extract canonical name, color, year.
+    8.  Look up model_id from motorcycle_catalog — hard stop if not found.
+    9.  Create OrderConfirmationDocument row.
+    10. Match each motorcycle to purchased record or create as incoming.
+    11. Auto-assign reservations.
     12. Mark submission and event complete.
     """
 
     # ------------------------------------------------------------------ #
-    # 1. Load PDF from disk and extract clean text                        #
+    # 1. Load PDF bytes from disk                                         #
     # ------------------------------------------------------------------ #
-    pdf_bytes, remaining_text, err = load_pdf_with_text(
-        db, submission, event, submission.raw_file_path
-    )
-    if err: return err
+    if not submission.raw_file_path or not os.path.exists(submission.raw_file_path):
+        return reject_and_return(db, submission, event, "Archivo PDF no encontrado en disco.")
+
+    with open(submission.raw_file_path, "rb") as f:
+        pdf_bytes = f.read()
 
     raw_text = extract_raw_pdf_text(pdf_bytes)
 
@@ -298,27 +298,28 @@ def handle_order_confirmation(
         return reject_and_return(db, submission, event, reason)
 
     # ------------------------------------------------------------------ #
-    # 5. Validate and auto-correct serie numbers                          #
+    # 5. Structural validation of extracted serie and motor numbers       #
     # ------------------------------------------------------------------ #
-    serie_corrected, remaining_text, err = validate_string_list(
-        db, submission, event,
-        motorcycles_data, "serie", "serie",
-        SERIE_LENGTH, remaining_text,
-    )
-    if err: return err
+    for i, moto in enumerate(motorcycles_data):
+        serie = moto.get("serie", "")
+        motor = moto.get("motor", "")
+        if not is_valid_serie(serie):
+            reason = (
+                f"Fila {i + 1}: el número de serie '{serie}' no tiene el formato "
+                f"esperado. Debe tener exactamente 17 caracteres alfanuméricos "
+                f"sin espacios, guiones ni caracteres especiales."
+            )
+            return reject_and_return(db, submission, event, reason)
+        if not is_valid_motor(motor):
+            reason = (
+                f"Fila {i + 1}: el número de motor '{motor}' no tiene el formato "
+                f"esperado. Debe tener exactamente 11 caracteres alfanuméricos "
+                f"sin espacios, guiones ni caracteres especiales."
+            )
+            return reject_and_return(db, submission, event, reason)
 
     # ------------------------------------------------------------------ #
-    # 6. Validate and auto-correct motor numbers                          #
-    # ------------------------------------------------------------------ #
-    motor_corrected, remaining_text, err = validate_string_list(
-        db, submission, event,
-        motorcycles_data, "motor", "motor",
-        MOTOR_LENGTH, remaining_text,
-    )
-    if err: return err
-
-    # ------------------------------------------------------------------ #
-    # 7. Build canonical names list from catalog                          #
+    # 6. Build canonical names list from catalog                          #
     # ------------------------------------------------------------------ #
     canonical_names = [
         row.canonical_name
@@ -326,7 +327,7 @@ def handle_order_confirmation(
     ]
 
     # ------------------------------------------------------------------ #
-    # 8. Parse model names                                                #
+    # 7. Parse model names                                                #
     # ------------------------------------------------------------------ #
     parsed_models = []
 
@@ -345,12 +346,12 @@ def handle_order_confirmation(
             "canonical_name": canonical_name,
             "color":          color,
             "year":           year,
-            "serie":          serie_corrected[i],
-            "motor":          motor_corrected[i],
+            "serie":          moto.get("serie", ""),
+            "motor":          moto.get("motor", ""),
         })
 
     # ------------------------------------------------------------------ #
-    # 9. Look up model_id from motorcycle_catalog                         #
+    # 8. Look up model_id from motorcycle_catalog                         #
     # ------------------------------------------------------------------ #
     resolved_models = []
 
@@ -370,7 +371,7 @@ def handle_order_confirmation(
         resolved_models.append({**parsed, "model_id": catalog_entry.model_id})
 
     # ------------------------------------------------------------------ #
-    # 10. Create OrderConfirmationDocument row                            #
+    # 9. Create OrderConfirmationDocument row                             #
     # ------------------------------------------------------------------ #
     order_conf_doc = OrderConfirmationDocument(
         submission_id = submission.submission_id,
@@ -381,8 +382,7 @@ def handle_order_confirmation(
     db.flush()
 
     # ------------------------------------------------------------------ #
-    # 11. Match each motorcycle to purchased record or create             #
-    #     as incoming                                                     #
+    # 10. Match each motorcycle to purchased record or create as incoming #
     # ------------------------------------------------------------------ #
     newly_incoming = []
 
@@ -416,7 +416,7 @@ def handle_order_confirmation(
             newly_incoming.append(new_moto)
 
     # ------------------------------------------------------------------ #
-    # 11b. Auto-assign reservations (Trigger B)                           #
+    # 11. Auto-assign reservations                                        #
     # ------------------------------------------------------------------ #
     if newly_incoming:
         assignment_results = _auto_assign_reservations(
