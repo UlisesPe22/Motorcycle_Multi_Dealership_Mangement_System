@@ -18,7 +18,7 @@ from services.main_pipeline import (
 from services.pipeline_utils import (
     load_image_as_pil,
     pil_to_jpeg_bytes,
-    _hamming,
+    _levenshtein,
     reject_and_return,
     check_confidence,
     mark_complete,
@@ -161,7 +161,7 @@ HOW TO EXTRACT NO.SERIE:
 - This is the fifth column, immediately after NO.MOTOR
 - It is always a longer alphanumeric string with NO spaces
 - It contains only letters and numbers, no hyphens
-- It is always exactly 17 characters long
+- It is always exactly 17 characters long.
 - Examples: "MD2A67MX9TCJ01148", "MD2C19BX7TWJ51566", "MD2B54DX0TCB00883"
 - Copy it exactly as written character by character
 - WARNING 1: this column may have handwritten marks, checkmarks, ink stamps,
@@ -279,9 +279,9 @@ def _autocorrect_against_pool(
 
     candidates = [
         p for p in pool
-        if len(p) == expected_length and _hamming(clean, p.upper()) == 1
-    ]
-
+        if abs(len(p) - expected_length) <= 2
+        and _levenshtein(clean, p.upper()) == 1
+                ]
     if len(candidates) == 1:
         return candidates[0], "corrected"
     elif len(candidates) > 1:

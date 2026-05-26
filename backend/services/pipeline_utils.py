@@ -172,22 +172,32 @@ def extract_clean_pdf_text(pdf_bytes: bytes) -> str:
     return full_text.replace(" ", "").replace("\n", "").replace("\r", "").upper()
 
 
-#def _levenshtein(s1: str, s2: str) -> int:
+def _levenshtein(s1: str, s2: str) -> int:
     """
-    Returns character-level edit distance between two equal-length strings.
-    For strings of different length returns the absolute length difference.
+    Full Levenshtein distance — handles strings of unequal length.
+    For equal-length strings this reduces to Hamming distance.
+    Used instead of Hamming because Gemini occasionally returns
+    strings of unexpected length from delivery documents.
     """
- #   if len(s1) != len(s2):
-#        return abs(len(s1) - len(s2))
- #   return sum(c1 != c2 for c1, c2 in zip(s1, s2))
-
-def _hamming(s1: str, s2: str) -> int:
-    """
-    Returns the number of character substitutions between two equal-length strings.
-    """
-    if len(s1) != len(s2):
-        raise ValueError("Hamming distance requires equal-length strings.")
-    return sum(c1 != c2 for c1, c2 in zip(s1, s2))
+    if s1 == s2:
+        return 0
+    if len(s1) == 0:
+        return len(s2)
+    if len(s2) == 0:
+        return len(s1)
+    if abs(len(s1) - len(s2)) > 2:
+        return 999
+    prev = list(range(len(s2) + 1))
+    for i, c1 in enumerate(s1):
+        curr = [i + 1]
+        for j, c2 in enumerate(s2):
+            curr.append(min(
+                prev[j + 1] + 1,
+                curr[j] + 1,
+                prev[j] + (0 if c1 == c2 else 1)
+            ))
+        prev = curr
+    return prev[-1]
 
 def validate_and_correct_string(
     gemini_value: str,
@@ -216,9 +226,12 @@ def validate_and_correct_string(
 
     candidates = set()
     for i in range(len(remaining_text) - expected_length + 1):
-        substring = remaining_text[i:i + expected_length]
-        if _hamming(clean_value, substring) == 1:
-            candidates.add(substring)
+        for length in range(max(1, expected_length - 2), expected_length + 3):
+            if i + length > len(remaining_text):
+                continue
+            substring = remaining_text[i:i + length]
+            if _levenshtein(clean_value, substring) == 1:
+                candidates.add(substring)
 
     if len(candidates) == 1:
         corrected = candidates.pop()
