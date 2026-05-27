@@ -9,10 +9,7 @@ const NAV_MAIN = [
   { path: '/registrar-entrega',   icon: '✔', label: 'Registrar Entrega' },
   { path: '/reservacion',         icon: '◈', label: 'Registrar Reservación' },
   { path: '/iniciar-venta',       icon: '◇', label: 'Iniciar Venta' },
-]
-
-const NAV_SOON = [
-  { path: '/registrar-empleado', icon: '◈', label: 'Registrar Empleado' },
+  { path: '/registrar-empleado',  icon: '◈', label: 'Registrar Empleado' },
 ]
 
 export default function Navbar() {
@@ -45,14 +42,6 @@ export default function Navbar() {
         )
       })}
 
-      <div className="sidebar-section">Próximamente</div>
-
-      {NAV_SOON.map(({ icon, label, path }) => (
-        <div key={path} className="sidebar-nav-soon">
-          {icon}&nbsp;&nbsp;{label}
-          <span className="soon-badge">Próx.</span>
-        </div>
-      ))}
     </>
   )
 }

@@ -4,13 +4,18 @@ from typing import Optional
 
 from docx import Document
 from sqlalchemy.orm import Session
+from num2words import num2words
 
 from config import (
     STORAGE_ROOT, CONTRACT_TEMPLATE_PATH,
     SOLICITUD_TEMPLATE_PATH, DISCOUNTS_ACTIVE,
     CONTRACTS_STORAGE_PATH,
 )
-
+def format_price_text(price: float) -> str:
+    pesos = int(price)
+    centavos = round((price - pesos) * 100)
+    words = num2words(pesos, lang='es').upper()
+    return f"{words} PESOS {centavos:02d}/100 M.N."
 
 def get_moto_price(catalog_entry) -> float:
     if DISCOUNTS_ACTIVE:
@@ -88,7 +93,7 @@ def build_contract_replacements(contract, db: Session) -> dict:
 
     return {
         "CONTRACT_NUMBER":    contract.contract_number,
-        "SELLER_OWNER_NAME":  "",
+        "SELLER_OWNER_NAME":  employee.name,
         "DEALERSHIP_NAME":    dealership.name_contract or "",
         "BUYER_NAME":         client.nombre_completo or "",
         "DEALERSHIP_ADDRESS": dealership.address or "",
@@ -113,19 +118,16 @@ def build_contract_replacements(contract, db: Session) -> dict:
         "MOTO_COLOR":         moto.color or "",
         "MOTO_BRAND":         "BAJAJ",
         "MOTO_COUNTRY":       "India",
-        "MOTO_CAPACITY":      "",
-        "MOTO_PEDIMENTO":     "",
-        "MOTO_ADUANA":        "",
+        "MOTO_CAPACITY":      "2 PASAJEROS",
+        "MOTO_PEDIMENTO":     "25 51 1626 5004107",
+        "MOTO_ADUANA":        "510-LAZARO CARDENAS, MICHOACAN",
         "MOTO_PRICE_NUMBER":  format_price(price),
-        "MOTO_PRICE_TEXT":    "",
+        "MOTO_PRICE_TEXT": format_price_text(price),
         "PAYMENT_AMOUNT":     format_price(
                                   contract.payment_downpayment or price),
         "PAYMENT_CONCEPT":    contract.sale_type.value.upper(),
         "PAYMENT_METHOD":     (contract.payment_method.value.upper()
                                if contract.payment_method else ""),
-        "EMPLOYEE_NAME":      employee.name if employee else "",
-        "DEALERSHIP_PRIVACY_EMAIL": "",
-        "DEALERSHIP_WEBSITE": "",
     }
 
 

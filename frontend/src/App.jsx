@@ -9,6 +9,7 @@ import Delivery from './pages/Delivery'
 import Reservation from './pages/Reservation'
 import Sale from './pages/Sale'
 import Placeholders from './pages/Placeholders'
+import RegisterVendedor from './pages/RegisterVendedor'
 
 function AppContent() {
   return (
@@ -27,7 +28,7 @@ function AppContent() {
           <Route path="/reservacion" element={<Reservation />} />
           <Route path="/iniciar-venta" element={<Sale />} />
           <Route path="/validar-venta" element={<Placeholders title="Validar Venta" />} />
-          <Route path="/registrar-empleado" element={<Placeholders title="Registrar Empleado" />} />
+          <Route path="/registrar-empleado" element={<RegisterVendedor />} />
         </Routes>
       </main>
     </div>

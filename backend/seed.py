@@ -91,6 +91,11 @@ def seed_event_types(db):
             required_slots = 1,
             description    = "Register distributor order confirmation with reference numbers."
         ),
+        EventType(
+            name           = EventName.registrar_vendedor,
+            required_slots = 0,
+            description    = "Registro de vendedor",
+        ),
     ]
     db.add_all(event_types)
     db.commit()

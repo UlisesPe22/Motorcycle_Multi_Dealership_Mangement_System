@@ -4,7 +4,8 @@
       "Bash(..venvScriptspython -c ' *)",
       "Bash(docker exec *)",
       "Bash(venv\\\\Scripts\\\\python.exe create_tables.py)",
-      "Bash(python create_tables.py)"
+      "Bash(python create_tables.py)",
+      "PowerShell(docker exec moto_app-backend-1 python /app/create_tables.py 2>&1)"
     ]
   }
 }

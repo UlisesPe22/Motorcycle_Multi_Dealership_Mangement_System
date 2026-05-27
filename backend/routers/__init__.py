@@ -1,1 +1,1 @@
-from routers import events, submissions, clients, delivery_confirmations, reservations, sales
+from routers import events, submissions, clients, delivery_confirmations, reservations, sales, registrar

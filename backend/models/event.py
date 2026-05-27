@@ -74,6 +74,7 @@ class EventName(str, enum.Enum):
     order_confirmation       = "order_confirmation"
     purchase_order           = "purchase_order"
     motorcycle_reservation   = "motorcycle_reservation"
+    registrar_vendedor       = "registrar_vendedor"
 
 
 class SlotName(str, enum.Enum):
