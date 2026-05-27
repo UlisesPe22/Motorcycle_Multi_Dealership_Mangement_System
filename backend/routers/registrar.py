@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.user import User, UserRole
 from models.dealership import Dealership
-from models.event import Event, EventType, EventName, EventStatus
+from models.event import Event, EventName, EventStatus
 
 router = APIRouter(prefix="/registrar", tags=["registrar"])
 
@@ -61,24 +61,17 @@ def create_vendedor(body: VendedorCreate, db: Session = Depends(get_db)):
         if not dealership:
             return {"success": False, "message": "Sucursal no encontrada."}
 
-        # 4. Look up EventType for registrar_vendedor
-        event_type = db.query(EventType).filter(
-            EventType.name == EventName.registrar_vendedor
-        ).first()
-        if not event_type:
-            return {"success": False, "message": "Event type not found — run seed.py"}
-
-        # 5. Create Event row
+        # 4. Create Event row
         event = Event(
-            event_type_id = event_type.event_type_id,
-            initiated_by  = HARDCODED_USER_ID,
-            status        = EventStatus.in_progress,
-            started_at    = datetime.now(timezone.utc),
+            event_type   = EventName.registrar_vendedor.value,
+            initiated_by = HARDCODED_USER_ID,
+            status       = EventStatus.in_progress,
+            started_at   = datetime.now(timezone.utc),
         )
         db.add(event)
         db.flush()
 
-        # 6. Create User row
+        # 5. Create User row
         user = User(
             name          = body.name.strip(),
             phone         = body.phone.strip(),
@@ -90,17 +83,17 @@ def create_vendedor(body: VendedorCreate, db: Session = Depends(get_db)):
         db.add(user)
         db.flush()
 
-        # 7. Mark event complete and link entity
+        # 6. Mark event complete and link entity
         event.status             = EventStatus.complete
         event.completed_at       = datetime.now(timezone.utc)
         event.linked_entity_type = "USER"
         event.linked_entity_id   = user.user_id
         db.flush()
 
-        # 8. Commit
+        # 7. Commit
         db.commit()
 
-        # 9. Return success
+        # 8. Return success
         return {
             "success": True,
             "message": f"Vendedor {user.name} registrado correctamente.",

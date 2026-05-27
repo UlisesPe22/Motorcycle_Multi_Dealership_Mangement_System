@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models.dealership  import Dealership
-from models.event       import Event, EventType, EventName, EventStatus
+from models.event       import Event, EventName, EventStatus, SlotName
+from config             import EVENT_SLOT_DEFINITIONS
 from models.submission  import Submission, SubmissionStatus
 
 router = APIRouter(prefix="/delivery-confirmations", tags=["delivery_confirmations"])
@@ -72,25 +73,13 @@ async def upload_delivery(
     # Create event                                                        #
     # ------------------------------------------------------------------ #
     from datetime import datetime, timezone
-    from models.event import EventSlotDefinition
     from models.submission import SubmissionStatus
-    from models.event import EventStatus
-
-    event_type = db.query(EventType).filter(
-        EventType.name == EventName.delivery_confirmation
-    ).first()
-
-    if not event_type:
-        raise HTTPException(
-            status_code=500,
-            detail="delivery_confirmation event type not found — run seed.py"
-        )
 
     event = Event(
-        event_type_id = event_type.event_type_id,
-        initiated_by  = HARDCODED_USER_ID,
-        status        = EventStatus.in_progress,
-        started_at    = datetime.now(timezone.utc),
+        event_type   = EventName.delivery_confirmation.value,
+        initiated_by = HARDCODED_USER_ID,
+        status       = EventStatus.in_progress,
+        started_at   = datetime.now(timezone.utc),
     )
     db.add(event)
     db.flush()
@@ -98,15 +87,14 @@ async def upload_delivery(
     # ------------------------------------------------------------------ #
     # Create submission                                                   #
     # ------------------------------------------------------------------ #
-    slot_def = db.query(EventSlotDefinition).filter(
-        EventSlotDefinition.event_type_id == event_type.event_type_id,
-        EventSlotDefinition.slot_number   == 1,
-    ).first()
+    slots       = EVENT_SLOT_DEFINITIONS.get("delivery_confirmation", [])
+    slot_number = slots[0][1]
+    slot_name   = SlotName(slots[0][0])
 
     submission = Submission(
         event_id    = event.event_id,
-        slot_number = slot_def.slot_number,
-        slot_name   = slot_def.slot_name,
+        slot_number = slot_number,
+        slot_name   = slot_name,
         status      = SubmissionStatus.pending,
     )
     db.add(submission)

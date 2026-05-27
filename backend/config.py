@@ -13,3 +13,14 @@ CONTRACT_TEMPLATE_PATH  = "/app/storage/templates/BAJAJ_Contrato_Template.docx"
 SOLICITUD_TEMPLATE_PATH = "/app/storage/templates/BAJAJ_Solicitud_Template.docx"
 CONTRACTS_STORAGE_PATH  = "/app/storage/contracts"
 STORAGE_ROOT            = "/app/storage"
+
+
+EVENT_SLOT_DEFINITIONS = {
+    "client_registration":    [("id_front", 1),              ("id_back", 2)],
+    "purchase_order":         [("purchase_order_table", 1)],
+    "order_confirmation":     [("order_table", 1)],
+    "delivery_confirmation":  [("delivery_table", 1)],
+    "motorcycle_reservation": [],
+    "sale_validation":        [],
+    "registrar_vendedor":     [],
+}

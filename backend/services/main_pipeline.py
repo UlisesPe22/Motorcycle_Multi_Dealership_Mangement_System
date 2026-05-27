@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from config import MODEL_NAME
 
-from models.event import Event, EventType, EventName
+from models.event import Event, EventName
 from models.submission import Submission
 
 from services.gemini_client import get_model
@@ -148,27 +148,23 @@ def process_upload(db: Session, submission_id: int) -> tuple[bool, str]:
         Event.event_id == submission.event_id
     ).first()
 
-    event_type = db.query(EventType).filter(
-        EventType.event_type_id == event.event_type_id
-    ).first()
-
-    if event_type.name == EventName.client_registration:
+    if event.event_type == EventName.client_registration.value:
         from services.pipeline_id_docs import handle_client_registration
         return handle_client_registration(db, submission, event)
 
-    elif event_type.name == EventName.purchase_order:
+    elif event.event_type == EventName.purchase_order.value:
         from services.pipeline_purchase import handle_purchase_order
         return handle_purchase_order(db, submission, event)
 
-    elif event_type.name == EventName.order_confirmation:
+    elif event.event_type == EventName.order_confirmation.value:
         from services.pipeline_order_confirmation import handle_order_confirmation
         return handle_order_confirmation(db, submission, event)
 
-    elif event_type.name == EventName.delivery_confirmation:
+    elif event.event_type == EventName.delivery_confirmation.value:
         from services.pipeline_delivery import handle_delivery_confirmation
         # declared_count and dealership_id come from the submission metadata
         # these will be passed via a dedicated endpoint — placeholder for now
         return False, "Pipeline de entrega requiere endpoint dedicado."
 
     else:
-        return False, f"No hay pipeline implementado para {event_type.name.value}"
+        return False, f"No hay pipeline implementado para {event.event_type}"

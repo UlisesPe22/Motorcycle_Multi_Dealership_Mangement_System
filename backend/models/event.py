@@ -1,27 +1,17 @@
 """
 event.py — SQLAlchemy models for the event system.
 
-This file defines three tightly coupled tables:
+This file defines one table:
 
-  1. EventType           — catalogue of business process types
-                           (client_registration, sale_validation, etc.)
-                           Seeded once, never changed at runtime.
+  Event — a single live instance of a business process.
+          Created when a user starts an action (e.g. clicks
+          "Register Client"). Groups all its submissions.
 
-  2. EventSlotDefinition — defines which document slots belong to each
-                           event type and in what order.
-                           e.g. client_registration requires:
-                             slot 1 → id_front
-                             slot 2 → id_back
+  event_type stores the EventName value as a plain VARCHAR string —
+  no separate event_types catalogue table, no FK.
 
-  3. Event               — a single live instance of a business process.
-                           Created when a user starts an action (e.g. clicks
-                           "Register Client"). Groups all its submissions.
-
-Relationships:
-  EventType         ──< EventSlotDefinition  (one type, many slot definitions)
-  EventType         ──< Event                (one type, many live events)
-  Event             ──< Submission           (one event, many submissions)
-                        (Submission is defined in submission.py)
+Slot definitions (which documents belong to each event type) live in
+config.EVENT_SLOT_DEFINITIONS — a hardcoded dict, not a DB table.
 
 State machine for EventStatus:
   in_progress → complete
@@ -29,8 +19,7 @@ State machine for EventStatus:
   in_progress → abandoned
 
 An event reaches 'complete' only when ALL child submissions reach 'complete'
-AND all cross-validation checks pass (same INE version on front and back,
-MRZ fields match front fields). The pipeline service is responsible for
+AND all cross-validation checks pass. The pipeline service is responsible for
 advancing this status — the model itself does not enforce it.
 """
 
@@ -65,7 +54,7 @@ class EventStatus(str, enum.Enum):
 class EventName(str, enum.Enum):
     """
     The set of business processes the system supports.
-    Mirrors the seeded rows in event_types.name.
+    Stored as a plain string in Event.event_type — not as a DB enum type.
     Used in application code so we never compare against bare strings.
     """
     client_registration      = "client_registration"
@@ -87,105 +76,12 @@ class SlotName(str, enum.Enum):
     not of their position (slot_1, slot_2), so the pipeline can use
     slot_name to know what kind of document to expect without a join.
     """
-    id_front       = "id_front"
-    id_back        = "id_back"
-    contract       = "contract"
-    delivery_table = "delivery_table"
-    order_table    = "order_table"
+    id_front             = "id_front"
+    id_back              = "id_back"
+    contract             = "contract"
+    delivery_table       = "delivery_table"
+    order_table          = "order_table"
     purchase_order_table = "purchase_order_table"
-
-
-# ======================================================================== #
-# EventType                                                                 #
-# ======================================================================== #
-
-class EventType(Base):
-    """
-    Catalogue table. One row per supported business process type.
-    Seeded at startup and never modified at runtime.
-
-    required_slots tells the event creation service how many Submission
-    rows to generate when a new Event of this type is created.
-    It must match the number of EventSlotDefinition rows for this type.
-    """
-    __tablename__ = "event_types"
-
-    event_type_id = Column(Integer, primary_key=True, autoincrement=True)
-
-    name = Column(
-        SAEnum(EventName, name="event_name_enum"),
-        nullable=False,
-        unique=True
-    )
-    required_slots = Column(Integer, nullable=False)
-    description    = Column(String, nullable=True)
-
-    # ------------------------------------------------------------------ #
-    # Relationships                                                        #
-    # ------------------------------------------------------------------ #
-    slot_definitions = relationship(
-        "EventSlotDefinition",
-        back_populates="event_type",
-        cascade="all, delete-orphan",
-        order_by="EventSlotDefinition.slot_number"
-        # Ordered so iterating slot_definitions always gives slot 1, 2, 3...
-    )
-
-    events = relationship(
-        "Event",
-        back_populates="event_type"
-    )
-
-    def __repr__(self) -> str:
-        return f"<EventType id={self.event_type_id} name={self.name}>"
-
-
-# ======================================================================== #
-# EventSlotDefinition                                                       #
-# ======================================================================== #
-
-class EventSlotDefinition(Base):
-    """
-    Defines the document slots that make up one event type.
-    Think of this as the template/schema for what documents are required.
-
-    Example rows for client_registration (event_type_id=1):
-      slot_number=1  slot_name=id_front  description="Front of INE"
-      slot_number=2  slot_name=id_back   description="Back of INE"
-
-    When a new Event is created, the pipeline service reads these rows
-    and creates one Submission row per slot definition. The slot_name
-    on the Submission tells the Gemini prompt what document to expect
-    ("I am expecting id_front — confirm this is the front of a Mexican INE").
-    """
-    __tablename__ = "event_slot_definitions"
-
-    slot_def_id   = Column(Integer, primary_key=True, autoincrement=True)
-
-    event_type_id = Column(
-        Integer,
-        ForeignKey("event_types.event_type_id"),
-        nullable=False
-    )
-    slot_number = Column(Integer, nullable=False)   # 1-based ordering
-    slot_name   = Column(
-        SAEnum(SlotName, name="slot_name_enum"),
-        nullable=False
-    )
-    description = Column(String, nullable=True)
-
-    # ------------------------------------------------------------------ #
-    # Relationships                                                        #
-    # ------------------------------------------------------------------ #
-    event_type = relationship("EventType", back_populates="slot_definitions")
-
-    def __repr__(self) -> str:
-        return (
-            f"<EventSlotDefinition "
-            f"event_type={self.event_type_id} "
-            f"slot={self.slot_number} "
-            f"name={self.slot_name}>"
-        )
 
 
 # ======================================================================== #
@@ -199,11 +95,9 @@ class Event(Base):
     Created the moment a user starts an action (e.g. clicks "Register Client").
     Groups all related Submission rows under one parent record.
 
-    The pipeline enforces this rule before advancing to Phase 2:
-      ALL submissions WHERE event_id = this event_id
-      must have status = 'matched'
-      AND gemini_detected_version must be identical across all submissions
-      (front and back must be the same INE version).
+    event_type stores the EventName value as a plain string
+    (e.g. "client_registration", "purchase_order"). There is no
+    separate event_types catalogue table.
 
     linked_entity_type / linked_entity_id form a polymorphic FK pattern.
     After a client_registration completes and a Client record is created,
@@ -218,13 +112,13 @@ class Event(Base):
     event_id = Column(Integer, primary_key=True, autoincrement=True)
 
     # ------------------------------------------------------------------ #
+    # Event type — stored as plain string (EventName value)               #
+    # ------------------------------------------------------------------ #
+    event_type = Column(String, nullable=False)
+
+    # ------------------------------------------------------------------ #
     # Foreign keys                                                         #
     # ------------------------------------------------------------------ #
-    event_type_id = Column(
-        Integer,
-        ForeignKey("event_types.event_type_id"),
-        nullable=False
-    )
     initiated_by = Column(
         Integer,
         ForeignKey("users.user_id"),
@@ -263,8 +157,6 @@ class Event(Base):
     # ------------------------------------------------------------------ #
     # Relationships                                                        #
     # ------------------------------------------------------------------ #
-    event_type = relationship("EventType", back_populates="events")
-
     submissions = relationship(
         "Submission",
         back_populates="event",
@@ -276,6 +168,6 @@ class Event(Base):
     def __repr__(self) -> str:
         return (
             f"<Event id={self.event_id} "
-            f"type={self.event_type_id} "
+            f"type={self.event_type} "
             f"status={self.status}>"
         )

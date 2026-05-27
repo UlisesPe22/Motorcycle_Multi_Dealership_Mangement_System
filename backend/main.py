@@ -14,7 +14,8 @@ from database import engine, Base
 
 # Import all models so tables are created on startup
 from models.user                        import User                                  # noqa
-from models.event                       import EventType, EventSlotDefinition, Event # noqa
+from models.event                       import Event                                 # noqa
+from models.color                       import Color                                 # noqa
 from models.submission                  import Submission                             # noqa
 from models.ai_analysis_log             import AIAnalysisLog                         # noqa
 from models.client                      import Client                                # noqa

@@ -15,7 +15,7 @@ from models.client import Client
 from models.dealership import Dealership
 from models.contract import Contract, SaleType, PaymentMethod
 from models.credit_institution import CreditInstitution
-from models.event import Event, EventType, EventName, EventStatus
+from models.event import Event, EventName, EventStatus
 from models.reservation import Reservation, ReservationStatus
 from models.user import User
 from services.pipeline_sale import (
@@ -199,15 +199,12 @@ def create_sale(body: SaleCreateBody, db: Session = Depends(get_db)):
             db, dealership.dealership_id)
 
         # 5. Create Event row
-        sale_event_type = db.query(EventType).filter(
-            EventType.name == EventName.sale_validation
-        ).first()
         now = datetime.now(timezone.utc)
         event = Event(
-            event_type_id = sale_event_type.event_type_id,
-            initiated_by  = HARDCODED_USER_ID,
-            status        = EventStatus.in_progress,
-            started_at    = now,
+            event_type   = EventName.sale_validation.value,
+            initiated_by = HARDCODED_USER_ID,
+            status       = EventStatus.in_progress,
+            started_at   = now,
         )
         db.add(event)
         db.flush()

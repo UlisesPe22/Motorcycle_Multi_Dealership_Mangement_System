@@ -9,8 +9,8 @@ from database import get_db
 from models.client import Client
 from models.dealership import Dealership
 from models.motorcycle_catalog import MotorcycleCatalog
-from models.motorcycle_catalog_color import MotorcycleColor
-from models.event import Event, EventType, EventName, EventStatus
+from models.color import Color
+from models.event import Event, EventName, EventStatus
 from models.reservation import Reservation, ReservationStatus
 from models.reservation_color import ReservationColor
 from models.motorcycle import Motorcycle, MotorcycleStatus
@@ -73,7 +73,7 @@ def get_models(db: Session = Depends(get_db)):
             "model_id":       m.model_id,
             "canonical_name": m.canonical_name,
             "year":           m.year,
-            "colors":         [ac.color.value for ac in m.available_colors],
+            "colors":         [ac.color.name for ac in m.available_colors],
         }
         for m in models
     ]
@@ -129,21 +129,20 @@ def create_reservation(body: ReservationCreate, db: Session = Depends(get_db)):
                 detail="El monto de reservación debe ser mayor a cero."
             )
 
-        # 5. Validate colors — non-empty, all valid MotorcycleColor, no duplicates
+        # 5. Validate colors — non-empty, all valid for this model, no duplicates
         if not body.colors:
             raise HTTPException(
                 status_code=400,
                 detail="Debes seleccionar al menos un color de preferencia."
             )
 
-        valid_color_values = {c.value for c in MotorcycleColor}
+        valid_color_values = {ac.color.name for ac in model.available_colors}
         seen = set()
-        color_enums = []
         for raw_color in body.colors:
             if raw_color not in valid_color_values:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Color '{raw_color}' no es válido."
+                    detail=f"Color '{raw_color}' no es válido para este modelo."
                 )
             if raw_color in seen:
                 raise HTTPException(
@@ -151,29 +150,18 @@ def create_reservation(body: ReservationCreate, db: Session = Depends(get_db)):
                     detail=f"Color duplicado: '{raw_color}'."
                 )
             seen.add(raw_color)
-            color_enums.append(MotorcycleColor(raw_color))
 
-        # 6. Look up EventType for motorcycle_reservation
-        event_type = db.query(EventType).filter(
-            EventType.name == EventName.motorcycle_reservation
-        ).first()
-        if not event_type:
-            raise HTTPException(
-                status_code=500,
-                detail="motorcycle_reservation event type not found — run seed.py"
-            )
-
-        # 7. Create Event row
+        # 6. Create Event row
         event = Event(
-            event_type_id = event_type.event_type_id,
-            initiated_by  = HARDCODED_USER_ID,
-            status        = EventStatus.in_progress,
-            started_at    = datetime.now(timezone.utc),
+            event_type   = EventName.motorcycle_reservation.value,
+            initiated_by = HARDCODED_USER_ID,
+            status       = EventStatus.in_progress,
+            started_at   = datetime.now(timezone.utc),
         )
         db.add(event)
         db.flush()
 
-        # 8. Create Reservation row
+        # 7. Create Reservation row
         reservation = Reservation(
             client_id      = body.client_id,
             model_id       = body.model_id,
@@ -187,22 +175,23 @@ def create_reservation(body: ReservationCreate, db: Session = Depends(get_db)):
         db.add(reservation)
         db.flush()
 
-        # 9. Create ReservationColor rows (priority = index, first = highest priority)
-        for priority, color_enum in enumerate(color_enums, start=1):
+        # 8. Create ReservationColor rows (priority = index, first = highest priority)
+        for priority, raw_color in enumerate(body.colors, start=1):
+            color_obj = db.query(Color).filter(Color.name == raw_color).first()
             db.add(ReservationColor(
                 reservation_id = reservation.reservation_id,
-                color          = color_enum,
+                color_id       = color_obj.color_id,
                 priority       = priority,
             ))
         db.flush()
 
-        # 10. Mark event complete and link entity
+        # 9. Mark event complete and link entity
         event.status             = EventStatus.complete
         event.completed_at       = datetime.now(timezone.utc)
         event.linked_entity_type = "RESERVATION"
         event.linked_entity_id   = reservation.reservation_id
 
-        # 11. Trigger A — auto-assign against incoming unassigned pool
+        # 10. Trigger A — auto-assign against incoming unassigned pool
         # Query only incoming motos for this dealership that are not
         # yet assigned to any reservation. The model matching and color
         # priority logic is handled inside _auto_assign_reservations().
@@ -224,7 +213,7 @@ def create_reservation(body: ReservationCreate, db: Session = Depends(get_db)):
                 for r in assignment_results
             )
 
-        # 12. Commit everything atomically
+        # 11. Commit everything atomically
         db.commit()
 
         status_label = "assigned" if assigned else "active"

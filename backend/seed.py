@@ -4,13 +4,13 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database import SessionLocal
-from models.user                  import User, UserRole
-from models.event                 import EventType, EventSlotDefinition, EventName, SlotName
-from models.dealership            import Dealership
-from models.motorcycle_catalog    import MotorcycleCatalog
+from models.user                     import User, UserRole
+from models.dealership               import Dealership
+from models.motorcycle_catalog       import MotorcycleCatalog
 from models.motorcycle_model_code    import MotorcycleModelCode
-from models.motorcycle_catalog_color import MotorcycleCatalogColor, MotorcycleColor
+from models.motorcycle_catalog_color import MotorcycleCatalogColor
 from models.credit_institution       import CreditInstitution
+from models.color                    import Color
 
 
 def seed_users(db):
@@ -60,100 +60,19 @@ def seed_dealerships(db):
     print(f"  ✓ Inserted {len(dealerships)} dealerships.")
 
 
-def seed_event_types(db):
-    if db.query(EventType).count() > 0:
-        print("  → event_types already seeded, skipping.")
-        return
-
-    event_types = [
-        EventType(
-            name           = EventName.client_registration,
-            required_slots = 2,
-            description    = "Register a new client by validating both sides of their INE."
-        ),
-        EventType(
-            name           = EventName.sale_validation,
-            required_slots = 1,
-            description    = "Validate a motorcycle sale contract to unlock commission."
-        ),
-        EventType(
-            name           = EventName.delivery_confirmation,
-            required_slots = 1,
-            description    = "Confirm motorcycle delivery with signed delivery table."
-        ),
-        EventType(
-            name           = EventName.purchase_order,
-            required_slots = 1,
-            description    = "Register a new motorcycle purchase order from distributor PDF."
-        ),
-        EventType(
-            name           = EventName.order_confirmation,
-            required_slots = 1,
-            description    = "Register distributor order confirmation with reference numbers."
-        ),
-        EventType(
-            name           = EventName.registrar_vendedor,
-            required_slots = 0,
-            description    = "Registro de vendedor",
-        ),
+def seed_colors(db):
+    colors_data = [
+        "Purpura", "Citrus", "Rojo", "Perla",
+        "Azul", "Negro", "Gris",
     ]
-    db.add_all(event_types)
+    inserted = 0
+    for name in colors_data:
+        existing = db.query(Color).filter(Color.name == name).first()
+        if not existing:
+            db.add(Color(name=name))
+            inserted += 1
     db.commit()
-    print(f"  ✓ Inserted {len(event_types)} event types.")
-
-
-def seed_slot_definitions(db):
-    if db.query(EventSlotDefinition).count() > 0:
-        print("  → event_slot_definitions already seeded, skipping.")
-        return
-
-    def get_type_id(name: EventName) -> int:
-        row = db.query(EventType).filter(EventType.name == name).first()
-        if not row:
-            raise RuntimeError(f"EventType '{name}' not found. Run seed_event_types first.")
-        return row.event_type_id
-
-    slots = [
-        EventSlotDefinition(
-            event_type_id = get_type_id(EventName.client_registration),
-            slot_number   = 1,
-            slot_name     = SlotName.id_front,
-            description   = "Front side of the client's INE voter ID card."
-        ),
-        EventSlotDefinition(
-            event_type_id = get_type_id(EventName.client_registration),
-            slot_number   = 2,
-            slot_name     = SlotName.id_back,
-            description   = "Back side of the client's INE voter ID card."
-        ),
-        EventSlotDefinition(
-            event_type_id = get_type_id(EventName.sale_validation),
-            slot_number   = 1,
-            slot_name     = SlotName.contract,
-            description   = "Signed motorcycle sale contract."
-        ),
-        EventSlotDefinition(
-            event_type_id = get_type_id(EventName.delivery_confirmation),
-            slot_number   = 1,
-            slot_name     = SlotName.delivery_table,
-            description   = "Signed delivery confirmation table."
-        ),
-        EventSlotDefinition(
-            event_type_id = get_type_id(EventName.purchase_order),
-            slot_number   = 1,
-            slot_name     = SlotName.purchase_order_table,
-            description   = "Purchase order PDF sent to distributor."
-        ),
-        EventSlotDefinition(
-            event_type_id = get_type_id(EventName.order_confirmation),
-            slot_number   = 1,
-            slot_name     = SlotName.order_table,
-            description   = "Order confirmation PDF received from distributor."
-        ),
-    ]
-    db.add_all(slots)
-    db.commit()
-    print(f"  ✓ Inserted {len(slots)} slot definitions.")
+    print(f"  ✓ Inserted {inserted} colors.")
 
 
 def seed_motorcycle_catalog(db):
@@ -260,24 +179,33 @@ def seed_motorcycle_catalog_colors(db):
             raise RuntimeError(f"Catalog entry '{canonical_name}' {year} not found.")
         return row.model_id
 
+    def get_color_id(name: str) -> int:
+        row = db.query(Color).filter(Color.name == name).first()
+        if not row:
+            raise RuntimeError(f"Color '{name}' not found — run seed_colors first.")
+        return row.color_id
+
     color_map = [
-        ("Pulsar N125 FI-CBS",  "2026", [MotorcycleColor.Purpura, MotorcycleColor.Citrus,  MotorcycleColor.Rojo]),
-        ("Pulsar N125 Car",     "2026", [MotorcycleColor.Citrus,  MotorcycleColor.Purpura]),
-        ("Pulsar N160",         "2026", [MotorcycleColor.Perla,   MotorcycleColor.Azul]),
-        ("Pulsar N160 Premium", "2026", [MotorcycleColor.Rojo,    MotorcycleColor.Azul,    MotorcycleColor.Negro]),
-        ("Pulsar N250 FI ABS",  "2026", [MotorcycleColor.Perla,   MotorcycleColor.Rojo,    MotorcycleColor.Negro]),
-        ("Dominar 250",         "2026", [MotorcycleColor.Negro,   MotorcycleColor.Rojo]),
-        ("Dominar 400 UG",      "2026", [MotorcycleColor.Negro]),
-        ("Pulsar NS200",        "2026", [MotorcycleColor.Negro,   MotorcycleColor.Rojo]),
-        ("Pulsar RS200",        "2025", [MotorcycleColor.Perla]),
-        ("Pulsar NS400Z",       "2025", [MotorcycleColor.Gris,    MotorcycleColor.Rojo]),
+        ("Pulsar N125 FI-CBS",  "2026", ["Purpura", "Citrus",  "Rojo"]),
+        ("Pulsar N125 Car",     "2026", ["Citrus",  "Purpura"]),
+        ("Pulsar N160",         "2026", ["Perla",   "Azul"]),
+        ("Pulsar N160 Premium", "2026", ["Rojo",    "Azul",    "Negro"]),
+        ("Pulsar N250 FI ABS",  "2026", ["Perla",   "Rojo",    "Negro"]),
+        ("Dominar 250",         "2026", ["Negro",   "Rojo"]),
+        ("Dominar 400 UG",      "2026", ["Negro"]),
+        ("Pulsar NS200",        "2026", ["Negro",   "Rojo"]),
+        ("Pulsar RS200",        "2025", ["Perla"]),
+        ("Pulsar NS400Z",       "2025", ["Gris",    "Rojo"]),
     ]
 
     entries = []
     for canonical_name, year, colors in color_map:
         model_id = get_catalog_id(canonical_name, year)
-        for color in colors:
-            entries.append(MotorcycleCatalogColor(model_id=model_id, color=color))
+        for color_name in colors:
+            entries.append(MotorcycleCatalogColor(
+                model_id = model_id,
+                color_id = get_color_id(color_name),
+            ))
 
     db.add_all(entries)
     db.commit()
@@ -297,27 +225,6 @@ def seed_credit_institutions(db):
     print("  ✓ Inserted 2 credit institutions.")
 
 
-def seed_motorcycle_reservation_event_type(db):
-    """
-    Idempotent — adds motorcycle_reservation event type if it doesn't
-    already exist. Safe to call even when the DB was seeded before this
-    event type was introduced.
-    """
-    existing = db.query(EventType).filter(
-        EventType.name == EventName.motorcycle_reservation
-    ).first()
-    if existing:
-        print("  → motorcycle_reservation event type already seeded, skipping.")
-        return
-    db.add(EventType(
-        name           = EventName.motorcycle_reservation,
-        required_slots = 0,
-        description    = "Reservación de motocicleta por cliente",
-    ))
-    db.commit()
-    print("  ✓ Inserted motorcycle_reservation event type.")
-
-
 def run_seed():
     db = SessionLocal()
     try:
@@ -325,12 +232,10 @@ def run_seed():
         seed_users(db)
         seed_dealerships(db)
         seed_credit_institutions(db)
-        seed_event_types(db)
-        seed_slot_definitions(db)
+        seed_colors(db)
         seed_motorcycle_catalog(db)
         seed_motorcycle_model_codes(db)
         seed_motorcycle_catalog_colors(db)
-        seed_motorcycle_reservation_event_type(db)
         print("\nSeed complete.\n")
     finally:
         db.close()

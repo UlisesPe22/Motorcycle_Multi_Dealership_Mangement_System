@@ -6,7 +6,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database import engine, Base
 
 from models.user                        import User                                  # noqa: F401
-from models.event                       import EventType, EventSlotDefinition, Event # noqa: F401
+from models.event                       import Event                                 # noqa: F401
+from models.color                       import Color                                 # noqa: F401
 from models.submission                  import Submission                             # noqa: F401
 from models.ai_analysis_log             import AIAnalysisLog                         # noqa: F401
 from models.client                      import Client                                # noqa: F401

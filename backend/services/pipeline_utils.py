@@ -459,14 +459,14 @@ def _auto_assign_reservations(
                 "reservation_id": reservation.reservation_id,
                 "client":         client_name,
                 "model":          reservation.model.canonical_name if reservation.model else "?",
-                "colors":         [rc.color.value for rc in reservation.colors],
+                "colors":         [rc.color.name for rc in reservation.colors],
                 "result":         "NO_MODEL_MATCH",
                 "moto_id":        None,
                 "color":          None,
             })
             continue
 
-        color_preferences = [rc.color.strip().lower() for rc in reservation.colors]
+        color_preferences = [rc.color.name.lower() for rc in reservation.colors]
         matched_moto = None
         matched_color = None
 
@@ -492,7 +492,7 @@ def _auto_assign_reservations(
                 "reservation_id": reservation.reservation_id,
                 "client":         client_name,
                 "model":          model_name,
-                "colors":         [rc.color.value for rc in reservation.colors],
+                "colors":         [rc.color.name for rc in reservation.colors],
                 "result":         "ASSIGNED",
                 "moto_id":        matched_moto.motorcycle_id,
                 "color":          matched_color,
@@ -502,7 +502,7 @@ def _auto_assign_reservations(
                 "reservation_id": reservation.reservation_id,
                 "client":         client_name,
                 "model":          model_name,
-                "colors":         [rc.color.value for rc in reservation.colors],
+                "colors":         [rc.color.name for rc in reservation.colors],
                 "result":         "NO_COLOR_MATCH",
                 "moto_id":        None,
                 "color":          None,
