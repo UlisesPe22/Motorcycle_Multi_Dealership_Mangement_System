@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from database import get_db
 from models.event import Event, EventName, EventStatus, SlotName
-from models.submission import Submission, SubmissionStatus
+from models.submission import Submission
 from config import EVENT_SLOT_DEFINITIONS
 
 router = APIRouter(prefix="/events", tags=["events"])
@@ -43,7 +43,6 @@ def create_event(event_type_name: EventName, db: Session = Depends(get_db)):
             event_id    = event.event_id,
             slot_number = slot_number,
             slot_name   = SlotName(slot_name_val),
-            status      = SubmissionStatus.pending,
         )
         db.add(sub)
         submissions.append(sub)
@@ -56,9 +55,9 @@ def create_event(event_type_name: EventName, db: Session = Depends(get_db)):
         "submissions": [
             {
                 "submission_id": s.submission_id,
-                "slot_name":     s.slot_name.value,
+                "slot_name": s.slot_name,
                 "slot_number":   s.slot_number,
-                "status":        s.status.value,
+                "status":        s.status.value if s.status else None,
             }
             for s in submissions
         ]

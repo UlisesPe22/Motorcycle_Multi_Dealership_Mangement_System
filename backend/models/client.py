@@ -39,6 +39,8 @@ class Client(Base):
     fecha_nacimiento  = Column(String, nullable=True)   # stored as string
                                                          # as printed on card
     domicilio         = Column(String, nullable=True)
+    email             = Column(String, unique=True, nullable=True)
+    phone             = Column(String, nullable=True)
 
     # ------------------------------------------------------------------ #
     # Traceability FKs — link back to the documents that created this     #

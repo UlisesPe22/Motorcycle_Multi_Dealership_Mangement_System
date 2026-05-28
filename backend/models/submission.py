@@ -53,12 +53,8 @@ class SubmissionStatus(str, enum.Enum):
     """
     Lifecycle states for a single document submission.
     """
-    pending    = "pending"     # row created, no file uploaded yet
-    processing = "processing"  # file uploaded, Gemini Phase 1 running
-    matched    = "matched"     # Phase 1 passed, template resolved,
-                               # normalised image saved
-    complete   = "complete"    # Phase 2 extraction done, all fields saved
-    rejected   = "rejected"    # permanent failure at any stage
+    complete = "complete"   # Phase 2 extraction done, all fields saved
+    rejected = "rejected"   # permanent failure at any stage
 
 
 class Submission(Base):
@@ -81,18 +77,14 @@ class Submission(Base):
     # Slot metadata                                                        #
     # ------------------------------------------------------------------ #
     slot_number = Column(Integer, nullable=False)
-    slot_name   = Column(
-        SAEnum(SlotName, name="slot_name_enum"),
-        nullable=False
-    )
+    slot_name = Column(String, nullable=False)
 
     # ------------------------------------------------------------------ #
     # Status                                                               #
     # ------------------------------------------------------------------ #
     status = Column(
         SAEnum(SubmissionStatus, name="submission_status_enum"),
-        nullable=False,
-        default=SubmissionStatus.pending
+        nullable=True,
     )
     rejection_reason = Column(String, nullable=True)
 

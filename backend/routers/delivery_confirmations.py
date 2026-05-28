@@ -8,7 +8,7 @@ from database import get_db
 from models.dealership  import Dealership
 from models.event       import Event, EventName, EventStatus, SlotName
 from config             import EVENT_SLOT_DEFINITIONS
-from models.submission  import Submission, SubmissionStatus
+from models.submission  import Submission
 
 router = APIRouter(prefix="/delivery-confirmations", tags=["delivery_confirmations"])
 
@@ -73,7 +73,6 @@ async def upload_delivery(
     # Create event                                                        #
     # ------------------------------------------------------------------ #
     from datetime import datetime, timezone
-    from models.submission import SubmissionStatus
 
     event = Event(
         event_type   = EventName.delivery_confirmation.value,
@@ -95,7 +94,6 @@ async def upload_delivery(
         event_id    = event.event_id,
         slot_number = slot_number,
         slot_name   = slot_name,
-        status      = SubmissionStatus.pending,
     )
     db.add(submission)
     db.flush()
@@ -112,7 +110,6 @@ async def upload_delivery(
         shutil.copyfileobj(file.file, f)
 
     submission.raw_file_path = raw_path
-    submission.status        = SubmissionStatus.processing
     db.commit()
 
     # ------------------------------------------------------------------ #

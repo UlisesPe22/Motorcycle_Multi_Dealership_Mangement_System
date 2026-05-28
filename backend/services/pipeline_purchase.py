@@ -272,7 +272,6 @@ def handle_purchase_order(
     purchase_doc = PurchaseDocument(
         submission_id        = submission.submission_id,
         dealership_id        = dealership.dealership_id,
-        normalised_file_path = dest_path,
         order_date           = fecha,
         total_units          = total_units,
     )

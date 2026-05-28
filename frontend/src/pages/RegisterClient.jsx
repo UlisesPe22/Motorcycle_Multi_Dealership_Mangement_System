@@ -14,6 +14,8 @@ export default function RegisterClient() {
   const [loading, setLoading]     = useState(false)
   const [statusMsg, setStatusMsg] = useState('')
   const [result, setResult]       = useState(null)
+  const [email, setEmail]         = useState('')
+  const [phone, setPhone]         = useState('')
 
   function handleFrontChange(e) {
     const file = e.target.files[0] ?? null
@@ -29,29 +31,16 @@ export default function RegisterClient() {
 
   async function handleSubmit() {
     setLoading(true)
-    setStatusMsg('Creando evento de registro...')
+    setStatusMsg('Procesando registro de cliente...')
     try {
-      const eventResp = await api.post('/events/', null, {
-        params: { event_type_name: 'client_registration' },
-      })
-      const submissions  = eventResp.data.submissions
-      const frontSubId = submissions.find(s => s.slot_name === 'id_front')?.submission_id
-      const backSubId  = submissions.find(s => s.slot_name === 'id_back')?.submission_id
-      if (!frontSubId || !backSubId) throw new Error('Slots de INE no encontrados.')
-
-      setStatusMsg('Validando frente del INE con IA...')
-      const frontFd = new FormData()
-      frontFd.append('file', frontFile)
-      const frontResp = await api.post(`/submissions/${frontSubId}/upload`, frontFd)
-      if (!frontResp.data.success) throw new Error(frontResp.data.message)
-
-      setStatusMsg('Validando reverso del INE con IA...')
-      const backFd = new FormData()
-      backFd.append('file', backFile)
-      const backResp = await api.post(`/submissions/${backSubId}/upload`, backFd)
-      if (!backResp.data.success) throw new Error(backResp.data.message)
-
-      setResult({ success: true, message: backResp.data.message })
+      const formData = new FormData()
+      formData.append('front_file', frontFile)
+      formData.append('back_file', backFile)
+      formData.append('email', email.trim().toLowerCase())
+      formData.append('phone', phone.trim())
+      const resp = await api.post('/clients/register', formData)
+      if (!resp.data.success) throw new Error(resp.data.message)
+      setResult({ success: true, message: resp.data.message })
     } catch (e) {
       setResult({ success: false, message: e.response?.data?.detail ?? e.message })
     } finally {
@@ -83,7 +72,7 @@ export default function RegisterClient() {
           <div className="btn-row" style={{ justifyContent: 'center' }}>
             <button
               className="btn-primary"
-              onClick={() => { setResult(null); setFrontFile(null); setBackFile(null); setFrontPreview(null); setBackPreview(null) }}
+              onClick={() => { setResult(null); setFrontFile(null); setBackFile(null); setFrontPreview(null); setBackPreview(null); setEmail(''); setPhone('') }}
             >
               Nuevo Registro
             </button>
@@ -100,6 +89,27 @@ export default function RegisterClient() {
     <>
       <PageHeader section="Clientes" title="Registrar Cliente" />
       <div className="col-center">
+        <div className="bi-card">
+          <CardSection title="Datos de Contacto">
+            <div className="upload-label">Correo Electrónico</div>
+            <input
+              type="email"
+              placeholder="correo@ejemplo.com"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              required
+            />
+            <div className="upload-label">Teléfono</div>
+            <input
+              type="text"
+              placeholder="5512345678"
+              value={phone}
+              onChange={e => setPhone(e.target.value)}
+              required
+            />
+          </CardSection>
+        </div>
+
         <div className="bi-card">
           <CardSection title="Frente del INE">
             <div className="upload-label">Parte frontal de la credencial de elector</div>
@@ -132,7 +142,7 @@ export default function RegisterClient() {
           <button className="btn-secondary" onClick={() => navigate('/')}>Volver</button>
           <button
             className="btn-primary"
-            disabled={!frontFile || !backFile}
+            disabled={!frontFile || !backFile || !email.trim() || !phone.trim()}
             onClick={handleSubmit}
           >
             Enviar y Procesar

@@ -358,7 +358,6 @@ def run_phase1(db: Session, submission: Submission) -> tuple[bool, str]:
         return False, reason
 
     # Update submission
-    submission.status                 = SubmissionStatus.matched
     submission.normalised_image_path  = normalised_path
     submission.gemini_detected_side   = phase1.detected_side
     submission.submitted_at           = datetime.now(timezone.utc)
@@ -378,11 +377,6 @@ def run_phase2(db: Session, event: Event) -> tuple[bool, str]:
     submissions = db.query(Submission).filter(
         Submission.event_id == event.event_id
     ).all()
-
-    # Gate: all must be matched
-    non_matched = [s for s in submissions if s.status != SubmissionStatus.matched]
-    if non_matched:
-        return False, "No todos los documentos han sido validados aún."
 
     model   = get_model()
 
@@ -562,19 +556,4 @@ def handle_client_registration(
         db.commit()
         return False, p1_message
 
-    all_subs = db.query(Submission).filter(
-        Submission.event_id == event.event_id
-    ).all()
-
-    all_matched = all(s.status == SubmissionStatus.matched for s in all_subs)
-
-    if not all_matched:
-        db.commit()
-        return True, "Documento validado. Esperando el otro lado del INE."
-
-    p2_success, p2_message = run_phase2(db, event)
-    if not p2_success:
-        db.commit()
-        return False, p2_message
-
-    return True, p2_message
+    return True, p1_message

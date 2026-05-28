@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models.submission import Submission, SubmissionStatus
+from models.submission import Submission
 from services.main_pipeline import process_upload
 
 router = APIRouter(prefix="/submissions", tags=["submissions"])
@@ -34,12 +34,6 @@ async def upload_document(
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
 
-    if submission.status not in (SubmissionStatus.pending, SubmissionStatus.rejected):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Submission is in status '{submission.status.value}' and cannot accept uploads"
-        )
-
     # Save raw file to disk
     os.makedirs(STORAGE_ROOT, exist_ok=True)
     ext      = os.path.splitext(file.filename)[-1].lower() or ".jpg"
@@ -48,9 +42,7 @@ async def upload_document(
     with open(raw_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    # Update submission with file path and mark as processing
     submission.raw_file_path = raw_path
-    submission.status        = SubmissionStatus.processing
     db.commit()
 
     # Run pipeline
