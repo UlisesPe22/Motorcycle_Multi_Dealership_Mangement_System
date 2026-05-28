@@ -23,3 +23,5 @@ EVENT_SLOT_DEFINITIONS = {
     "sale_validation":        [],
     "registrar_vendedor":     [],
 }
+
+SALE_LOCK_MINUTES = 15

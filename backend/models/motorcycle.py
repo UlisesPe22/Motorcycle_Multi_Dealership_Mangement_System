@@ -11,6 +11,7 @@ class MotorcycleStatus(str, enum.Enum):
     incoming_reserved = "incoming_reserved"
     in_stock          = "in_stock"
     in_stock_reserved = "in_stock_reserved"
+    reserved_for_sale = "reserved_for_sale"
     not_purchased     = "not_purchased"
     rejected          = "rejected"
     sold              = "sold"
@@ -45,6 +46,12 @@ class Motorcycle(Base):
     reference_number         = Column(String, nullable=True, unique=True)
     motor_number             = Column(String, nullable=True, unique=True)
     color                    = Column(String, nullable=True)
+
+    # ------------------------------------------------------------------ #
+    # Sale lock — populated while a salesperson holds this unit           #
+    # ------------------------------------------------------------------ #
+    previous_status          = Column(String, nullable=True)
+    locked_at                = Column(DateTime(timezone=True), nullable=True)
 
     # ------------------------------------------------------------------ #
     # Lifecycle                                                           #

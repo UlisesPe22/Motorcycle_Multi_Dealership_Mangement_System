@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
 from database import get_db
-from config import CONTRACTS_STORAGE_PATH
+from config import CONTRACTS_STORAGE_PATH, SALE_LOCK_MINUTES
 from models.motorcycle import Motorcycle, MotorcycleStatus
 from models.motorcycle_catalog import MotorcycleCatalog
 from models.client import Client
@@ -55,6 +55,19 @@ def get_clients(db: Session = Depends(get_db)):
 @router.get("/motorcycles")
 def get_motorcycles(client_id: Optional[int] = None,
                     db: Session = Depends(get_db)):
+
+    # Lazy unlock — release any expired sale locks
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=SALE_LOCK_MINUTES)
+    expired = db.query(Motorcycle).filter(
+        Motorcycle.status    == MotorcycleStatus.reserved_for_sale,
+        Motorcycle.locked_at <= cutoff,
+    ).all()
+    for moto in expired:
+        moto.status          = MotorcycleStatus(moto.previous_status or "in_stock")
+        moto.previous_status = None
+        moto.locked_at       = None
+    if expired:
+        db.commit()
 
     # STEP A — Find client's reserved motorcycle
     reserved_moto_id = None
@@ -140,6 +153,101 @@ def get_credit_institutions(db: Session = Depends(get_db)):
 
 
 # ======================================================================== #
+# POST /sales/lock-motorcycle                                                #
+# ======================================================================== #
+
+class LockMotorcycleBody(BaseModel):
+    motorcycle_id:          int
+    previous_motorcycle_id: Optional[int] = None
+
+
+@router.post("/lock-motorcycle")
+def lock_motorcycle(body: LockMotorcycleBody, db: Session = Depends(get_db)):
+    try:
+        # 1. Unlock previous motorcycle if provided
+        if body.previous_motorcycle_id:
+            prev = (
+                db.query(Motorcycle)
+                .filter(
+                    Motorcycle.motorcycle_id == body.previous_motorcycle_id,
+                    Motorcycle.status        == MotorcycleStatus.reserved_for_sale,
+                )
+                .with_for_update()
+                .first()
+            )
+            if prev:
+                prev.status          = MotorcycleStatus(prev.previous_status or "in_stock")
+                prev.previous_status = None
+                prev.locked_at       = None
+                db.flush()
+
+        # 2. Lock new motorcycle
+        moto = (
+            db.query(Motorcycle)
+            .filter(
+                Motorcycle.motorcycle_id == body.motorcycle_id,
+                Motorcycle.status.in_([
+                    MotorcycleStatus.in_stock,
+                    MotorcycleStatus.in_stock_reserved,
+                ]),
+            )
+            .with_for_update()
+            .first()
+        )
+        if not moto:
+            db.rollback()
+            return {"success": False,
+                    "message": "Esta motocicleta ya no está disponible."}
+
+        now                  = datetime.now(timezone.utc)
+        moto.previous_status = moto.status.value
+        moto.status          = MotorcycleStatus.reserved_for_sale
+        moto.locked_at       = now
+        db.flush()
+
+        db.commit()
+        return {
+            "success":       True,
+            "motorcycle_id": body.motorcycle_id,
+            "locked_at":     moto.locked_at.isoformat(),
+        }
+
+    except Exception as e:
+        db.rollback()
+        return {"success": False, "message": str(e)}
+
+
+# ======================================================================== #
+# POST /sales/unlock-motorcycle                                              #
+# ======================================================================== #
+
+class UnlockMotorcycleBody(BaseModel):
+    motorcycle_id: int
+
+
+@router.post("/unlock-motorcycle")
+def unlock_motorcycle(body: UnlockMotorcycleBody, db: Session = Depends(get_db)):
+    try:
+        moto = db.query(Motorcycle).filter(
+            Motorcycle.motorcycle_id == body.motorcycle_id,
+            Motorcycle.status        == MotorcycleStatus.reserved_for_sale,
+        ).first()
+        if not moto:
+            return {"success": True}
+
+        moto.status          = MotorcycleStatus(moto.previous_status or "in_stock")
+        moto.previous_status = None
+        moto.locked_at       = None
+
+        db.commit()
+        return {"success": True}
+
+    except Exception as e:
+        db.rollback()
+        return {"success": False, "message": str(e)}
+
+
+# ======================================================================== #
 # POST /sales/create                                                         #
 # ======================================================================== #
 
@@ -171,25 +279,20 @@ def create_sale(body: SaleCreateBody, db: Session = Depends(get_db)):
             return {"success": False,
                     "message": f"Cliente con id {body.client_id} no encontrado."}
 
-        # 2. Validate motorcycle is available
+        # 2. Validate motorcycle is locked for sale (SELECT FOR UPDATE)
         moto = (
             db.query(Motorcycle)
-            .options(
-                joinedload(Motorcycle.dealership),
-                joinedload(Motorcycle.model),
-            )
             .filter(
                 Motorcycle.motorcycle_id == body.motorcycle_id,
-                Motorcycle.status.in_([
-                    MotorcycleStatus.in_stock,
-                    MotorcycleStatus.in_stock_reserved,
-                ]),
+                Motorcycle.status        == MotorcycleStatus.reserved_for_sale,
             )
+            .with_for_update()
             .first()
         )
         if not moto:
             return {"success": False,
-                    "message": "Esta motocicleta no está disponible."}
+                    "message": "Esta motocicleta ya no está disponible. "
+                               "Por favor selecciónala nuevamente."}
 
         # 3. Get dealership
         dealership = moto.dealership
@@ -237,8 +340,10 @@ def create_sale(body: SaleCreateBody, db: Session = Depends(get_db)):
         # 7. Generate documents
         generate_documents(contract, db)
 
-        # 8. Mark motorcycle sold
-        moto.status = MotorcycleStatus.sold
+        # 8. Mark motorcycle sold, clear lock fields
+        moto.status          = MotorcycleStatus.sold
+        moto.previous_status = None
+        moto.locked_at       = None
         db.flush()
 
         # 9. Complete event

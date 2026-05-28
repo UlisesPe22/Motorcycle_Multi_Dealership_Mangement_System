@@ -34,8 +34,9 @@ export default function Sale() {
   const [municipio, setMunicipio]             = useState('')
   const [estado, setEstado]                   = useState('')
 
-  const [loading, setLoading] = useState(false)
-  const [result, setResult]   = useState(null)
+  const [loading, setLoading]       = useState(false)
+  const [result, setResult]         = useState(null)
+  const [lockedMotoId, setLockedMotoId] = useState(null)
 
   useEffect(() => {
     Promise.all([
@@ -49,19 +50,62 @@ export default function Sale() {
       .catch(() => setFetchError('No se puede conectar al servidor.'))
   }, [])
 
+  // Unlock current lock when client changes
+  useEffect(() => {
+    if (lockedMotoId) {
+      api.post('/sales/unlock-motorcycle', {
+        motorcycle_id: parseInt(lockedMotoId)
+      }).catch(() => {})
+      setLockedMotoId(null)
+      setMotoId('')
+    }
+  }, [selectedClientId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Unlock on page leave
+  useEffect(() => {
+    return () => {
+      if (lockedMotoId) {
+        api.post('/sales/unlock-motorcycle', {
+          motorcycle_id: parseInt(lockedMotoId)
+        }).catch(() => {})
+      }
+    }
+  }, [lockedMotoId])
+
   useEffect(() => {
     if (!selectedClientId) { setMotos([]); setMotoId(''); return }
-    setMotosLoading(true)
-    api.get(`/sales/motorcycles?client_id=${selectedClientId}`)
-      .then(r => {
+    setMotosLoading(true);
+    (async () => {
+      try {
+        const r    = await api.get(`/sales/motorcycles?client_id=${selectedClientId}`)
         const data = r.data
         setMotos(data)
         const pre = data.find(m => m.pre_selected)
-        if (pre) setMotoId(String(pre.motorcycle_id))
-        else setMotoId('')
-      })
-      .catch(() => setMotos([]))
-      .finally(() => setMotosLoading(false))
+        if (pre) {
+          const preId = String(pre.motorcycle_id)
+          try {
+            const res = await api.post('/sales/lock-motorcycle', {
+              motorcycle_id: pre.motorcycle_id,
+              previous_motorcycle_id: null,
+            })
+            if (res.data.success) {
+              setLockedMotoId(preId)
+              setMotoId(preId)
+            } else {
+              setMotoId('')
+            }
+          } catch {
+            setMotoId('')
+          }
+        } else {
+          setMotoId('')
+        }
+      } catch {
+        setMotos([])
+      } finally {
+        setMotosLoading(false)
+      }
+    })()
   }, [selectedClientId])
 
   const selectedMoto = motos.find(m => String(m.motorcycle_id) === selectedMotoId) ?? null
@@ -81,6 +125,7 @@ export default function Sale() {
   })()
 
   function clearState() {
+    setLockedMotoId(null)
     setSaleType('contado'); setClientId(''); setMotos([]); setMotoId('')
     setPayMethod('transferencia'); setDownpayment(''); setInstitutionId('')
     setPaymentBank(''); setReferenceName(''); setReferencePhone('')
@@ -237,7 +282,41 @@ export default function Sale() {
               <div className="caption">No hay motocicletas disponibles para este cliente.</div>
             ) : (
               <>
-                <select value={selectedMotoId} onChange={e => setMotoId(e.target.value)}>
+                <select value={selectedMotoId} onChange={async (e) => {
+                  const newMotoId  = e.target.value
+                  const prevMotoId = lockedMotoId
+
+                  if (newMotoId === '') {
+                    if (prevMotoId) {
+                      try {
+                        await api.post('/sales/unlock-motorcycle', {
+                          motorcycle_id: parseInt(prevMotoId)
+                        })
+                      } catch (err) {
+                        console.error('Unlock failed:', err)
+                      }
+                      setLockedMotoId(null)
+                    }
+                    setMotoId('')
+                  } else {
+                    try {
+                      const res = await api.post('/sales/lock-motorcycle', {
+                        motorcycle_id:          parseInt(newMotoId),
+                        previous_motorcycle_id: prevMotoId ? parseInt(prevMotoId) : null,
+                      })
+                      if (res.data.success) {
+                        setLockedMotoId(newMotoId)
+                        setMotoId(newMotoId)
+                      } else {
+                        alert(res.data.message)
+                        setMotoId('')
+                        setLockedMotoId(null)
+                      }
+                    } catch (err) {
+                      console.error('Lock failed:', err)
+                    }
+                  }
+                }}>
                   <option value="">Seleccionar motocicleta...</option>
                   {motos.map(m => (
                     <option key={m.motorcycle_id} value={m.motorcycle_id}>
