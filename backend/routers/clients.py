@@ -7,23 +7,20 @@ GET  /clients/{id}      — get one client with full detail
 """
 
 import os
-import shutil
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from config import STORAGE_ROOT
+from config import STORAGE_ROOT, HARDCODED_USER_ID
 from database import get_db
 from models.client import Client
-from models.event import Event, EventName, EventStatus, SlotName
+from models.event import EventName, SlotName
 from models.submission import Submission
 from services.pipeline_id_docs import handle_client_registration, run_phase2
+from services.pipeline_utils import create_event, save_upload_to_disk
 
 router = APIRouter(prefix="/clients", tags=["clients"])
-
-HARDCODED_USER_ID = 1
 
 
 @router.post("/register")
@@ -40,17 +37,9 @@ async def register_client(
     Returns client_id and event_id on success.
     """
     raw_dir = os.path.join(STORAGE_ROOT, "submissions", "raw")
-    os.makedirs(raw_dir, exist_ok=True)
 
     # Create event
-    event = Event(
-        event_type   = EventName.client_registration.value,
-        initiated_by = HARDCODED_USER_ID,
-        status       = EventStatus.in_progress,
-        started_at   = datetime.now(timezone.utc),
-    )
-    db.add(event)
-    db.flush()
+    event = create_event(db, EventName.client_registration.value, HARDCODED_USER_ID)
 
     # Create and save front submission
     front_sub = Submission(
@@ -61,11 +50,9 @@ async def register_client(
     db.add(front_sub)
     db.flush()
 
-    front_ext  = os.path.splitext(front_file.filename or "")[-1].lower() or ".jpg"
-    front_path = os.path.join(raw_dir, f"sub_{front_sub.submission_id}{front_ext}")
-    with open(front_path, "wb") as f:
-        shutil.copyfileobj(front_file.file, f)
-    front_sub.raw_file_path = front_path
+    front_sub.raw_file_path = save_upload_to_disk(
+        front_sub.submission_id, front_file, raw_dir, front_file.filename or ""
+    )
     db.flush()
 
     # Phase 1 — front
@@ -82,11 +69,9 @@ async def register_client(
     db.add(back_sub)
     db.flush()
 
-    back_ext  = os.path.splitext(back_file.filename or "")[-1].lower() or ".jpg"
-    back_path = os.path.join(raw_dir, f"sub_{back_sub.submission_id}{back_ext}")
-    with open(back_path, "wb") as f:
-        shutil.copyfileobj(back_file.file, f)
-    back_sub.raw_file_path = back_path
+    back_sub.raw_file_path = save_upload_to_disk(
+        back_sub.submission_id, back_file, raw_dir, back_file.filename or ""
+    )
     db.flush()
 
     # Phase 1 — back

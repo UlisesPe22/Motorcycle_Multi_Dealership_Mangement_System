@@ -7,11 +7,11 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.user import User, UserRole
 from models.dealership import Dealership
-from models.event import Event, EventName, EventStatus
+from models.event import EventName, EventStatus
+from config import HARDCODED_USER_ID
+from services.pipeline_utils import create_event
 
 router = APIRouter(prefix="/registrar", tags=["registrar"])
-
-HARDCODED_USER_ID = 2
 
 
 # ======================================================================== #
@@ -62,14 +62,7 @@ def create_vendedor(body: VendedorCreate, db: Session = Depends(get_db)):
             return {"success": False, "message": "Sucursal no encontrada."}
 
         # 4. Create Event row
-        event = Event(
-            event_type   = EventName.registrar_vendedor.value,
-            initiated_by = HARDCODED_USER_ID,
-            status       = EventStatus.in_progress,
-            started_at   = datetime.now(timezone.utc),
-        )
-        db.add(event)
-        db.flush()
+        event = create_event(db, EventName.registrar_vendedor.value, HARDCODED_USER_ID)
 
         # 5. Create User row
         user = User(

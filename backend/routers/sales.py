@@ -18,15 +18,15 @@ from models.credit_institution import CreditInstitution
 from models.event import Event, EventName, EventStatus
 from models.reservation import Reservation, ReservationStatus
 from models.user import User
+from config import HARDCODED_USER_ID
 from services.pipeline_sale import (
     generate_contract_number,
     generate_documents,
     get_moto_price,
 )
+from services.pipeline_utils import create_event
 
 router = APIRouter(prefix="/sales", tags=["sales"])
-
-HARDCODED_USER_ID = 2
 
 
 # ======================================================================== #
@@ -302,15 +302,8 @@ def create_sale(body: SaleCreateBody, db: Session = Depends(get_db)):
             db, dealership.dealership_id)
 
         # 5. Create Event row
-        now = datetime.now(timezone.utc)
-        event = Event(
-            event_type   = EventName.sale_validation.value,
-            initiated_by = HARDCODED_USER_ID,
-            status       = EventStatus.in_progress,
-            started_at   = now,
-        )
-        db.add(event)
-        db.flush()
+        now   = datetime.now(timezone.utc)
+        event = create_event(db, EventName.sale_validation.value, HARDCODED_USER_ID)
 
         # 6. Create Contract row
         contract = Contract(

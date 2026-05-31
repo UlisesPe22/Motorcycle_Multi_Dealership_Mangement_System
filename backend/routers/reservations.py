@@ -14,14 +14,14 @@ from models.event import Event, EventName, EventStatus
 from models.reservation import Reservation, ReservationStatus
 from models.reservation_color import ReservationColor
 from models.motorcycle import Motorcycle, MotorcycleStatus
+from config import HARDCODED_USER_ID
 from services.pipeline_utils import (
+    create_event,
     _auto_assign_reservations,
     _print_reservation_assignment_results,
 )
 
 router = APIRouter(prefix="/reservations", tags=["reservations"])
-
-HARDCODED_USER_ID = 2
 
 
 # ======================================================================== #
@@ -152,14 +152,7 @@ def create_reservation(body: ReservationCreate, db: Session = Depends(get_db)):
             seen.add(raw_color)
 
         # 6. Create Event row
-        event = Event(
-            event_type   = EventName.motorcycle_reservation.value,
-            initiated_by = HARDCODED_USER_ID,
-            status       = EventStatus.in_progress,
-            started_at   = datetime.now(timezone.utc),
-        )
-        db.add(event)
-        db.flush()
+        event = create_event(db, EventName.motorcycle_reservation.value, HARDCODED_USER_ID)
 
         # 7. Create Reservation row
         reservation = Reservation(

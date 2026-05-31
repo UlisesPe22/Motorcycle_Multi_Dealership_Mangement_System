@@ -10,21 +10,19 @@ from models.event import Event, EventName
 from models.submission import Submission
 
 from services.gemini_client import get_model
-from services.pipeline_utils import log_ai, reject_submission, reject_event
+from services.pipeline_utils import log_ai
 
 # ======================================================================== #
 # Re-export shared helpers so existing imports from main_pipeline work      #
 # ======================================================================== #
-# (pipeline_id_docs, pipeline_purchase, pipeline_order_confirmation, and
-#  pipeline_delivery all import these names from services.main_pipeline)
+# (pipeline_purchase, pipeline_order_confirmation, pipeline_delivery all
+#  import log_ai from services.main_pipeline)
 __all__ = [
     "get_model",
     "call_gemini_image",
     "call_gemini_pdf",
     "call_gemini_text",
     "log_ai",
-    "reject_submission",
-    "reject_event",
 ]
 
 

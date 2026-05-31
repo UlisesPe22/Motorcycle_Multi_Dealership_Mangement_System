@@ -3,13 +3,13 @@ pipeline_utils.py — Shared utilities for all pipeline services.
 
 Covers image processing, PDF text extraction, string validation,
 AI logging, submission/event state transitions, and reusable pipeline
-building blocks (reject_and_return, check_confidence, load_pdf_with_text,
-validate_and_correct_string, mark_complete).
+building blocks (reject_and_return, check_confidence, mark_complete).
 """
 
 import io
 import os
 import re
+import shutil
 import cv2
 import numpy as np
 from PIL import Image
@@ -35,12 +35,6 @@ def pil_to_cv2(pil_image: Image.Image) -> np.ndarray:
     """Convert PIL Image to OpenCV BGR numpy array."""
     rgb = np.array(pil_image.convert("RGB"))
     return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-
-
-def cv2_to_pil(cv2_image: np.ndarray) -> Image.Image:
-    """Convert OpenCV BGR numpy array to PIL Image."""
-    rgb = cv2.cvtColor(cv2_image, cv2.COLOR_BGR2RGB)
-    return Image.fromarray(rgb)
 
 
 def load_image_as_pil(path: str) -> Image.Image:
@@ -200,50 +194,6 @@ def _levenshtein(s1: str, s2: str) -> int:
         prev = curr
     return prev[-1]
 
-def validate_and_correct_string(
-    gemini_value: str,
-    expected_length: int,
-    remaining_text: str,
-) -> tuple[Optional[str], str, str]:
-    """
-    Validates a string extracted by Gemini against the PDF ground truth.
-    Attempts single-character auto-correction if exact match fails.
-    Consumes matched string from pool to prevent false matches on subsequent calls.
-
-    Returns:
-        (corrected_value, status, updated_remaining_text)
-
-        status values:
-          "exact"      — Gemini was correct, no correction needed
-          "corrected"  — single character error found and auto-corrected
-          "ambiguous"  — multiple candidates at distance 1, cannot safely correct
-          "not_found"  — no candidate within distance 1, string too corrupt
-    """
-    clean_value = gemini_value.replace(" ", "").upper()
-
-    if clean_value in remaining_text:
-        updated = remaining_text.replace(clean_value, "", 1)
-        return clean_value, "exact", updated
-
-    candidates = set()
-    for i in range(len(remaining_text) - expected_length + 1):
-        for length in range(max(1, expected_length - 2), expected_length + 3):
-            if i + length > len(remaining_text):
-                continue
-            substring = remaining_text[i:i + length]
-            if _levenshtein(clean_value, substring) == 1:
-                candidates.add(substring)
-
-    if len(candidates) == 1:
-        corrected = candidates.pop()
-        updated = remaining_text.replace(corrected, "", 1)
-        return corrected, "corrected", updated
-    elif len(candidates) > 1:
-        return None, "ambiguous", remaining_text
-    else:
-        return None, "not_found", remaining_text
-
-
 # ======================================================================== #
 # Structural regex validators                                               #
 # ======================================================================== #
@@ -384,39 +334,6 @@ def check_confidence(
     return True, ""
 
 
-def load_pdf_with_text(
-    db: Session,
-    submission: Submission,
-    event: Event,
-    raw_path: str,
-) -> tuple[Optional[bytes], Optional[str], Optional[tuple]]:
-    """
-    Opens PDF from disk, reads bytes, extracts clean pdfplumber text.
-    Returns (pdf_bytes, clean_text, None) on success.
-    Returns (None, None, (False, reason)) on failure — caller must return
-    the third element immediately if it is not None.
-
-    Example usage:
-        pdf_bytes, clean_text, err = load_pdf_with_text(db, submission, event, raw_path)
-        if err: return err
-    """
-    if not raw_path or not os.path.exists(raw_path):
-        reason = "Archivo PDF no encontrado en disco."
-        return None, None, reject_and_return(db, submission, event, reason)
-    try:
-        with open(raw_path, "rb") as f:
-            pdf_bytes = f.read()
-    except Exception as e:
-        reason = f"Error al leer el archivo: {e}"
-        return None, None, reject_and_return(db, submission, event, reason)
-    try:
-        clean_text = extract_clean_pdf_text(pdf_bytes)
-    except Exception as e:
-        reason = f"Error al extraer texto del PDF: {e}"
-        return None, None, reject_and_return(db, submission, event, reason)
-    return pdf_bytes, clean_text, None
-
-
 def _auto_assign_reservations(
     db: Session,
     dealership_id: int,
@@ -550,3 +467,64 @@ def mark_complete(
     db.flush()
     event.linked_entity_id   = entity_id
     db.commit()
+
+
+# ======================================================================== #
+# Router-level utilities                                                    #
+# ======================================================================== #
+
+def create_event(db: Session, event_type: str, user_id: int) -> Event:
+    """Creates and flushes a new Event row with status in_progress."""
+    event = Event(
+        event_type   = event_type,
+        initiated_by = user_id,
+        status       = EventStatus.in_progress,
+        started_at   = datetime.now(timezone.utc),
+    )
+    db.add(event)
+    db.flush()
+    return event
+
+
+def create_submissions_for_event(
+    db: Session,
+    event_id: int,
+    event_type_name: str,
+) -> list:
+    """
+    Creates Submission rows for all slots defined in EVENT_SLOT_DEFINITIONS
+    for the given event type. Returns list of created Submission objects.
+    """
+    from models.event import SlotName
+    from config import EVENT_SLOT_DEFINITIONS
+
+    slots = EVENT_SLOT_DEFINITIONS.get(event_type_name, [])
+    submissions = []
+    for slot_name_val, slot_number in slots:
+        sub = Submission(
+            event_id    = event_id,
+            slot_number = slot_number,
+            slot_name   = SlotName(slot_name_val),
+        )
+        db.add(sub)
+        submissions.append(sub)
+    db.flush()
+    return submissions
+
+
+def save_upload_to_disk(
+    submission_id: int,
+    file,
+    storage_root: str,
+    original_filename: str,
+) -> str:
+    """
+    Saves an uploaded file to disk under storage_root/sub_<id><ext>.
+    Creates the directory if needed. Returns the full path.
+    """
+    os.makedirs(storage_root, exist_ok=True)
+    ext      = os.path.splitext(original_filename)[-1].lower() or ".jpg"
+    raw_path = os.path.join(storage_root, f"sub_{submission_id}{ext}")
+    with open(raw_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    return raw_path

@@ -33,14 +33,19 @@ from schemas.gemini_responses import (
     Phase2FrontResponse,
     Phase2BackResponse,
 )
-from services.pipeline_utils import warp_and_save, load_image_as_pil, pil_to_jpeg_bytes
+from services.pipeline_utils import (
+    warp_and_save,
+    load_image_as_pil,
+    pil_to_jpeg_bytes,
+    log_ai,
+    reject_submission,
+    reject_event,
+    reject_and_return,
+)
 
 from services.main_pipeline import (
     get_model,
     call_gemini_image,
-    log_ai,
-    reject_submission,
-    reject_event,
 )
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', '.env'))
@@ -285,7 +290,7 @@ def _cross_validate(front_fields: dict, back_fields: dict) -> tuple[bool, str]:
 # Main pipeline entry point                                                 #
 # ======================================================================== #
 
-def run_phase1(db: Session, submission: Submission) -> tuple[bool, str]:
+def run_phase1(db: Session, submission: Submission, event: Event) -> tuple[bool, str]:
     """
     Phase 1 — Identification.
     Validates the document, detects version and corners.
@@ -298,8 +303,7 @@ def run_phase1(db: Session, submission: Submission) -> tuple[bool, str]:
 
     raw_path = submission.raw_file_path
     if not raw_path or not os.path.exists(raw_path):
-        reject_submission(db, submission, "Archivo de imagen no encontrado.")
-        return False, "Archivo de imagen no encontrado."
+        return reject_and_return(db, submission, event, "Archivo de imagen no encontrado.")
 
     # Load and encode image
     pil_img    = load_image_as_pil(raw_path)
@@ -311,9 +315,8 @@ def run_phase1(db: Session, submission: Submission) -> tuple[bool, str]:
         raw_response, parsed_dict = call_gemini_image(model, prompt, img_bytes)
     except ValueError as e:
         reason = f"Error al procesar la respuesta de IA: {e}"
-        log_ai(db, submission.submission_id, "identification", prompt, str(e), None, None, False)
-        reject_submission(db, submission, reason)
-        return False, reason
+        log_ai(db, submission.submission_id, "identification", str(e), None, None, False)
+        return reject_and_return(db, submission, event, reason)
 
     # Validate response structure
     try:
@@ -321,8 +324,7 @@ def run_phase1(db: Session, submission: Submission) -> tuple[bool, str]:
     except ValidationError as e:
         reason = f"Respuesta de IA con formato inválido: {e}"
         log_ai(db, submission.submission_id, "identification", raw_response, parsed_dict, None, False)
-        reject_submission(db, submission, reason)
-        return False, reason
+        return reject_and_return(db, submission, event, reason)
 
     # Log regardless of outcome
     log_ai(
@@ -333,8 +335,7 @@ def run_phase1(db: Session, submission: Submission) -> tuple[bool, str]:
 
     # Check is_match
     if not phase1.is_match:
-        reject_submission(db, submission, phase1.user_message)
-        return False, phase1.user_message
+        return reject_and_return(db, submission, event, phase1.user_message)
 
     # Check confidence
     if phase1.confidence < CONFIDENCE_THRESHOLD:
@@ -342,8 +343,7 @@ def run_phase1(db: Session, submission: Submission) -> tuple[bool, str]:
             f"Confianza insuficiente ({phase1.confidence:.0%}). "
             f"{phase1.user_message}"
         )
-        reject_submission(db, submission, reason)
-        return False, reason
+        return reject_and_return(db, submission, event, reason)
 
     # Warp and save normalised image
     normalised_path = os.path.join(
@@ -354,8 +354,7 @@ def run_phase1(db: Session, submission: Submission) -> tuple[bool, str]:
         warp_and_save(raw_path, phase1.corners.model_dump(), normalised_path)
     except Exception as e:
         reason = f"Error al normalizar la imagen: {e}"
-        reject_submission(db, submission, reason)
-        return False, reason
+        return reject_and_return(db, submission, event, reason)
 
     # Update submission
     submission.normalised_image_path  = normalised_path
@@ -403,18 +402,14 @@ def run_phase2(db: Session, event: Event) -> tuple[bool, str]:
         front_raw, front_dict = call_gemini_image(model, front_prompt, front_bytes)
     except ValueError as e:
         reason = f"Error al extraer datos del frente: {e}"
-        reject_submission(db, front_sub, reason)
-        reject_event(db, event, reason)
-        return False, reason
+        return reject_and_return(db, front_sub, event, reason)
 
     try:
         front_result = Phase2FrontResponse(**front_dict)
     except ValidationError as e:
         reason = f"Respuesta de IA inválida en extracción del frente: {e}"
-        log_ai(db, front_sub.submission_id, "extraction", front_prompt, front_raw, front_dict, None, False)
-        reject_submission(db, front_sub, reason)
-        reject_event(db, event, reason)
-        return False, reason
+        log_ai(db, front_sub.submission_id, "extraction", front_raw, front_dict, None, False)
+        return reject_and_return(db, front_sub, event, reason)
 
     log_ai(
         db, front_sub.submission_id, "extraction",
@@ -429,9 +424,7 @@ def run_phase2(db: Session, event: Event) -> tuple[bool, str]:
             f"({front_result.overall_confidence:.0%}). "
             "Por favor, use una imagen más clara."
         )
-        reject_submission(db, front_sub, reason)
-        reject_event(db, event, reason)
-        return False, reason
+        return reject_and_return(db, front_sub, event, reason)
 
     # ------------------------------------------------------------------ #
     # Extract back                                                         #
@@ -452,18 +445,14 @@ def run_phase2(db: Session, event: Event) -> tuple[bool, str]:
         back_raw, back_dict = call_gemini_image(model, back_prompt, back_bytes)
     except ValueError as e:
         reason = f"Error al extraer datos del reverso: {e}"
-        reject_submission(db, back_sub, reason)
-        reject_event(db, event, reason)
-        return False, reason
+        return reject_and_return(db, back_sub, event, reason)
 
     try:
         back_result = Phase2BackResponse(**back_dict)
     except ValidationError as e:
         reason = f"Respuesta de IA inválida en extracción del reverso: {e}"
-        log_ai(db, back_sub.submission_id, "extraction", back_prompt, back_raw, back_dict, None, False)
-        reject_submission(db, back_sub, reason)
-        reject_event(db, event, reason)
-        return False, reason
+        log_ai(db, back_sub.submission_id, "extraction", back_raw, back_dict, None, False)
+        return reject_and_return(db, back_sub, event, reason)
 
     log_ai(
         db, back_sub.submission_id, "extraction",
@@ -478,9 +467,7 @@ def run_phase2(db: Session, event: Event) -> tuple[bool, str]:
             f"({back_result.overall_confidence:.0%}). "
             "Por favor, use una imagen más clara."
         )
-        reject_submission(db, back_sub, reason)
-        reject_event(db, event, reason)
-        return False, reason
+        return reject_and_return(db, back_sub, event, reason)
 
     # ------------------------------------------------------------------ #
     # Cross-validation                                                     #
@@ -550,7 +537,7 @@ def handle_client_registration(
     event: Event,
 ) -> tuple[bool, str]:
 
-    p1_success, p1_message = run_phase1(db, submission)
+    p1_success, p1_message = run_phase1(db, submission, event)
     if not p1_success:
         reject_event(db, event, p1_message)
         db.commit()

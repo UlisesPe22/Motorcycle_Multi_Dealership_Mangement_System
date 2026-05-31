@@ -1,22 +1,20 @@
 import os
-import shutil
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models.dealership  import Dealership
-from models.event       import Event, EventName, EventStatus, SlotName
-from config             import EVENT_SLOT_DEFINITIONS
-from models.submission  import Submission
+from models.dealership import Dealership
+from models.event      import EventName
+from models.submission import Submission
+from config import HARDCODED_USER_ID
+from services.pipeline_utils import create_event, create_submissions_for_event, save_upload_to_disk
 
 router = APIRouter(prefix="/delivery-confirmations", tags=["delivery_confirmations"])
 
 STORAGE_ROOT = os.path.join(
     os.path.dirname(__file__), '..', '..', 'storage', 'submissions', 'raw'
 )
-
-HARDCODED_USER_ID = 2
 
 
 # ======================================================================== #
@@ -70,46 +68,19 @@ async def upload_delivery(
         )
 
     # ------------------------------------------------------------------ #
-    # Create event                                                        #
+    # Create event and submission                                        #
     # ------------------------------------------------------------------ #
-    from datetime import datetime, timezone
-
-    event = Event(
-        event_type   = EventName.delivery_confirmation.value,
-        initiated_by = HARDCODED_USER_ID,
-        status       = EventStatus.in_progress,
-        started_at   = datetime.now(timezone.utc),
-    )
-    db.add(event)
-    db.flush()
-
-    # ------------------------------------------------------------------ #
-    # Create submission                                                   #
-    # ------------------------------------------------------------------ #
-    slots       = EVENT_SLOT_DEFINITIONS.get("delivery_confirmation", [])
-    slot_number = slots[0][1]
-    slot_name   = SlotName(slots[0][0])
-
-    submission = Submission(
-        event_id    = event.event_id,
-        slot_number = slot_number,
-        slot_name   = slot_name,
-    )
-    db.add(submission)
-    db.flush()
+    event = create_event(db, EventName.delivery_confirmation.value, HARDCODED_USER_ID)
+    submissions = create_submissions_for_event(db, event.event_id, EventName.delivery_confirmation.value)
+    submission  = submissions[0]
     db.commit()
 
     # ------------------------------------------------------------------ #
     # Save file to disk                                                   #
     # ------------------------------------------------------------------ #
-    os.makedirs(STORAGE_ROOT, exist_ok=True)
-    ext      = os.path.splitext(file.filename)[-1].lower() or ".jpg"
-    raw_path = os.path.join(STORAGE_ROOT, f"sub_{submission.submission_id}{ext}")
-
-    with open(raw_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-
-    submission.raw_file_path = raw_path
+    submission.raw_file_path = save_upload_to_disk(
+        submission.submission_id, file, STORAGE_ROOT, file.filename or ""
+    )
     db.commit()
 
     # ------------------------------------------------------------------ #

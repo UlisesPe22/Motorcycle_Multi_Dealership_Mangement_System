@@ -1,5 +1,4 @@
 import os
-import shutil
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
@@ -7,6 +6,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models.submission import Submission
 from services.main_pipeline import process_upload
+from services.pipeline_utils import save_upload_to_disk
 
 router = APIRouter(prefix="/submissions", tags=["submissions"])
 
@@ -35,14 +35,9 @@ async def upload_document(
         raise HTTPException(status_code=404, detail="Submission not found")
 
     # Save raw file to disk
-    os.makedirs(STORAGE_ROOT, exist_ok=True)
-    ext      = os.path.splitext(file.filename)[-1].lower() or ".jpg"
-    raw_path = os.path.join(STORAGE_ROOT, f"sub_{submission_id}{ext}")
-
-    with open(raw_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-
-    submission.raw_file_path = raw_path
+    submission.raw_file_path = save_upload_to_disk(
+        submission_id, file, STORAGE_ROOT, file.filename or ""
+    )
     db.commit()
 
     # Run pipeline
