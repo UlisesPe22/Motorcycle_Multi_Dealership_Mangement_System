@@ -10,7 +10,9 @@ import os
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from config import STORAGE_ROOT, HARDCODED_USER_ID
 from database import get_db
@@ -29,7 +31,7 @@ async def register_client(
     back_file:  UploadFile = File(...),
     email: str = Form(...),
     phone: str = Form(...),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Full INE client registration in a single call.
@@ -39,7 +41,7 @@ async def register_client(
     raw_dir = os.path.join(STORAGE_ROOT, "submissions", "raw")
 
     # Create event
-    event = create_event(db, EventName.client_registration.value, HARDCODED_USER_ID)
+    event = await create_event(db, EventName.client_registration.value, HARDCODED_USER_ID)
 
     # Create and save front submission
     front_sub = Submission(
@@ -48,15 +50,16 @@ async def register_client(
         slot_name   = SlotName.id_front,
     )
     db.add(front_sub)
-    db.flush()
+    await db.flush()
 
+    front_bytes = await front_file.read()
     front_sub.raw_file_path = save_upload_to_disk(
-        front_sub.submission_id, front_file, raw_dir, front_file.filename or ""
+        front_sub.submission_id, front_bytes, raw_dir, front_file.filename or ""
     )
-    db.flush()
+    await db.flush()
 
     # Phase 1 — front
-    success_front, message_front = handle_client_registration(db, front_sub, event)
+    success_front, message_front = await handle_client_registration(db, front_sub, event)
     if not success_front:
         return {"success": False, "message": message_front}
 
@@ -67,31 +70,33 @@ async def register_client(
         slot_name   = SlotName.id_back,
     )
     db.add(back_sub)
-    db.flush()
+    await db.flush()
 
+    back_bytes = await back_file.read()
     back_sub.raw_file_path = save_upload_to_disk(
-        back_sub.submission_id, back_file, raw_dir, back_file.filename or ""
+        back_sub.submission_id, back_bytes, raw_dir, back_file.filename or ""
     )
-    db.flush()
+    await db.flush()
 
     # Phase 1 — back
-    success_back, message_back = handle_client_registration(db, back_sub, event)
+    success_back, message_back = await handle_client_registration(db, back_sub, event)
     if not success_back:
         return {"success": False, "message": message_back}
 
     # Phase 2 — extraction + cross-validation + client creation
-    success_p2, message_p2 = run_phase2(db, event)
+    success_p2, message_p2 = await run_phase2(db, event)
     if not success_p2:
         return {"success": False, "message": message_p2}
 
     # Attach contact data to the newly created client
-    client = db.query(Client).filter(
-        Client.event_id == event.event_id
-    ).first()
+    result = await db.execute(
+        select(Client).where(Client.event_id == event.event_id)
+    )
+    client = result.scalar_one_or_none()
     if client:
         client.email = email.strip().lower()
         client.phone = phone.strip()
-        db.commit()
+        await db.commit()
     else:
         return {"success": False, "message": "Error al guardar datos de contacto."}
 
@@ -104,9 +109,17 @@ async def register_client(
 
 
 @router.get("/")
-def list_clients(db: Session = Depends(get_db)):
+async def list_clients(db: AsyncSession = Depends(get_db)):
     """Return all registered clients with their submission image paths."""
-    clients = db.query(Client).order_by(Client.registered_at.desc()).all()
+    result = await db.execute(
+        select(Client)
+        .options(
+            selectinload(Client.front_submission),
+            selectinload(Client.back_submission),
+        )
+        .order_by(Client.registered_at.desc())
+    )
+    clients = result.scalars().all()
     return [
         {
             "client_id":          c.client_id,
@@ -124,9 +137,17 @@ def list_clients(db: Session = Depends(get_db)):
 
 
 @router.get("/{client_id}")
-def get_client(client_id: int, db: Session = Depends(get_db)):
+async def get_client(client_id: int, db: AsyncSession = Depends(get_db)):
     """Return one client by ID."""
-    c = db.query(Client).filter(Client.client_id == client_id).first()
+    result = await db.execute(
+        select(Client)
+        .options(
+            selectinload(Client.front_submission),
+            selectinload(Client.back_submission),
+        )
+        .where(Client.client_id == client_id)
+    )
+    c = result.scalar_one_or_none()
     if not c:
         raise HTTPException(status_code=404, detail="Client not found")
     return {
@@ -143,12 +164,20 @@ def get_client(client_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/image/{client_id}/{side}")
-def get_client_image(client_id: int, side: str, db: Session = Depends(get_db)):
+async def get_client_image(client_id: int, side: str, db: AsyncSession = Depends(get_db)):
     """
     Serve the normalised card image for a client.
-    side must be 'front' or 'back'..
+    side must be 'front' or 'back'.
     """
-    c = db.query(Client).filter(Client.client_id == client_id).first()
+    result = await db.execute(
+        select(Client)
+        .options(
+            selectinload(Client.front_submission),
+            selectinload(Client.back_submission),
+        )
+        .where(Client.client_id == client_id)
+    )
+    c = result.scalar_one_or_none()
     if not c:
         raise HTTPException(status_code=404, detail="Client not found")
 

@@ -1,9 +1,9 @@
 import os
-from datetime import datetime, timezone
 from typing import Optional
 
 from docx import Document
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
 from num2words import num2words
 
 from config import (
@@ -11,11 +11,14 @@ from config import (
     SOLICITUD_TEMPLATE_PATH, DISCOUNTS_ACTIVE,
     CONTRACTS_STORAGE_PATH,
 )
+
+
 def format_price_text(price: float) -> str:
     pesos = int(price)
     centavos = round((price - pesos) * 100)
     words = num2words(pesos, lang='es').upper()
     return f"{words} PESOS {centavos:02d}/100 M.N."
+
 
 def get_moto_price(catalog_entry) -> float:
     if DISCOUNTS_ACTIVE:
@@ -27,15 +30,21 @@ def format_price(price: float) -> str:
     return f"${price:,.2f}"
 
 
-def generate_contract_number(db: Session, dealership_id: int) -> str:
+async def generate_contract_number(db: AsyncSession, dealership_id: int) -> str:
     from models.dealership import Dealership
     from models.contract import Contract
-    dealership = db.query(Dealership).filter(
-        Dealership.dealership_id == dealership_id
-    ).first()
-    count = db.query(Contract).filter(
-        Contract.dealership_id == dealership_id
-    ).count()
+
+    result = await db.execute(
+        select(Dealership).where(Dealership.dealership_id == dealership_id)
+    )
+    dealership = result.scalar_one()
+
+    count = await db.scalar(
+        select(func.count()).select_from(Contract).where(
+            Contract.dealership_id == dealership_id
+        )
+    ) or 0
+
     return f"{dealership.contract_prefix}{count + 1:06d}"
 
 
@@ -43,16 +52,12 @@ def replace_placeholders(doc: Document, replacements: dict) -> None:
     """
     Replaces all {{ KEY }} placeholders in DOCX.
     Handles split runs by rebuilding paragraph text.
-    Iterates both paragraphs and all table cells.
-    Placeholder format in document: {{ KEY }}
-    with spaces inside the double braces.
     """
     def replace_in_paragraph(para):
         for key, value in replacements.items():
             placeholder = f"{{{{ {key} }}}}"
             if placeholder in para.text:
-                full_text = para.text.replace(
-                    placeholder, str(value or ""))
+                full_text = para.text.replace(placeholder, str(value or ""))
                 for run in para.runs:
                     run.text = ""
                 if para.runs:
@@ -68,7 +73,7 @@ def replace_placeholders(doc: Document, replacements: dict) -> None:
                     replace_in_paragraph(para)
 
 
-def build_contract_replacements(contract, db: Session) -> dict:
+async def build_contract_replacements(contract, db: AsyncSession) -> dict:
     from models.motorcycle_model_code import MotorcycleModelCode
 
     client     = contract.client
@@ -86,9 +91,12 @@ def build_contract_replacements(contract, db: Session) -> dict:
         12: "diciembre"
     }
 
-    code_entry = db.query(MotorcycleModelCode).filter(
-        MotorcycleModelCode.model_id == catalog.model_id
-    ).first()
+    result = await db.execute(
+        select(MotorcycleModelCode).where(
+            MotorcycleModelCode.model_id == catalog.model_id
+        )
+    )
+    code_entry = result.scalar_one_or_none()
     moto_code = code_entry.modelo_code if code_entry else ""
 
     return {
@@ -122,23 +130,20 @@ def build_contract_replacements(contract, db: Session) -> dict:
         "MOTO_PEDIMENTO":     "25 51 1626 5004107",
         "MOTO_ADUANA":        "510-LAZARO CARDENAS, MICHOACAN",
         "MOTO_PRICE_NUMBER":  format_price(price),
-        "MOTO_PRICE_TEXT": format_price_text(price),
-        "PAYMENT_AMOUNT":     format_price(
-                                  contract.payment_downpayment or price),
+        "MOTO_PRICE_TEXT":    format_price_text(price),
+        "PAYMENT_AMOUNT":     format_price(contract.payment_downpayment or price),
         "PAYMENT_CONCEPT":    contract.sale_type.value.upper(),
         "PAYMENT_METHOD":     (contract.payment_method.value.upper()
                                if contract.payment_method else ""),
     }
 
 
-def build_solicitud_replacements(contract, db: Session) -> dict:
-    base  = build_contract_replacements(contract, db)
+async def build_solicitud_replacements(contract, db: AsyncSession) -> dict:
+    base  = await build_contract_replacements(contract, db)
     price = get_moto_price(contract.motorcycle.model)
     base.update({
-        "PAYMENT_DOWNPAYMENT":     format_price(
-            contract.payment_downpayment or 0),
-        "PAYMENT_PENDING":         format_price(
-            price - (contract.payment_downpayment or 0)),
+        "PAYMENT_DOWNPAYMENT":     format_price(contract.payment_downpayment or 0),
+        "PAYMENT_PENDING":         format_price(price - (contract.payment_downpayment or 0)),
         "PAYMENT_BANK":            contract.payment_bank or "",
         "PAYMENT_FINANCE_COMPANY": (contract.institution.name
                                     if contract.institution else ""),
@@ -154,7 +159,7 @@ def build_solicitud_replacements(contract, db: Session) -> dict:
     return base
 
 
-def generate_documents(contract, db: Session) -> tuple[str, Optional[str]]:
+async def generate_documents(contract, db: AsyncSession) -> tuple[str, Optional[str]]:
     os.makedirs(CONTRACTS_STORAGE_PATH, exist_ok=True)
 
     contract_docx_path = os.path.join(
@@ -162,7 +167,7 @@ def generate_documents(contract, db: Session) -> tuple[str, Optional[str]]:
         f"{contract.contract_number}_contrato.docx"
     )
     doc = Document(CONTRACT_TEMPLATE_PATH)
-    replace_placeholders(doc, build_contract_replacements(contract, db))
+    replace_placeholders(doc, await build_contract_replacements(contract, db))
     doc.save(contract_docx_path)
 
     solicitud_docx_path = None
@@ -173,7 +178,7 @@ def generate_documents(contract, db: Session) -> tuple[str, Optional[str]]:
         )
         sol_doc = Document(SOLICITUD_TEMPLATE_PATH)
         replace_placeholders(
-            sol_doc, build_solicitud_replacements(contract, db))
+            sol_doc, await build_solicitud_replacements(contract, db))
         sol_doc.save(solicitud_docx_path)
 
     return contract_docx_path, solicitud_docx_path

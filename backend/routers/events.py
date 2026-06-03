@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from models.event import EventName
@@ -10,7 +10,7 @@ router = APIRouter(prefix="/events", tags=["events"])
 
 
 @router.post("/")
-def create_event(event_type_name: EventName, db: Session = Depends(get_db)):
+async def create_event(event_type_name: EventName, db: AsyncSession = Depends(get_db)):
     """
     Create a new event of any standard type.
     Automatically creates one submission row per slot definition.
@@ -24,9 +24,9 @@ def create_event(event_type_name: EventName, db: Session = Depends(get_db)):
             detail=f"Tipo de evento inválido: {event_type_name}"
         )
 
-    event = _create_event(db, event_name.value, HARDCODED_USER_ID)
-    submissions = create_submissions_for_event(db, event.event_id, event_name.value)
-    db.commit()
+    event = await _create_event(db, event_name.value, HARDCODED_USER_ID)
+    submissions = await create_submissions_for_event(db, event.event_id, event_name.value)
+    await db.commit()
 
     return {
         "event_id": event.event_id,
@@ -34,7 +34,7 @@ def create_event(event_type_name: EventName, db: Session = Depends(get_db)):
         "submissions": [
             {
                 "submission_id": s.submission_id,
-                "slot_name": s.slot_name,
+                "slot_name":     s.slot_name,
                 "slot_number":   s.slot_number,
                 "status":        s.status.value if s.status else None,
             }

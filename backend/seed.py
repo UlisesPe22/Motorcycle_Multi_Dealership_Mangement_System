@@ -1,9 +1,12 @@
 import sys
 import os
+import asyncio
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from database import SessionLocal
+from sqlalchemy import select, func
+
+from database import AsyncSessionLocal
 from models.user                     import User, UserRole
 from models.dealership               import Dealership
 from models.motorcycle_catalog       import MotorcycleCatalog
@@ -13,8 +16,9 @@ from models.credit_institution       import CreditInstitution
 from models.color                    import Color
 
 
-def seed_users(db):
-    if db.query(User).count() > 0:
+async def seed_users(db):
+    count = (await db.execute(select(func.count()).select_from(User))).scalar()
+    if count > 0:
         print("  → users already seeded, skipping.")
         return
 
@@ -23,12 +27,13 @@ def seed_users(db):
         User(name="eskeleton", role=UserRole.employee),
     ]
     db.add_all(users)
-    db.commit()
+    await db.commit()
     print(f"  ✓ Inserted {len(users)} users.")
 
 
-def seed_dealerships(db):
-    if db.query(Dealership).count() > 0:
+async def seed_dealerships(db):
+    count = (await db.execute(select(func.count()).select_from(Dealership))).scalar()
+    if count > 0:
         print("  → dealerships already seeded, skipping.")
         return
 
@@ -56,27 +61,28 @@ def seed_dealerships(db):
         ),
     ]
     db.add_all(dealerships)
-    db.commit()
+    await db.commit()
     print(f"  ✓ Inserted {len(dealerships)} dealerships.")
 
 
-def seed_colors(db):
+async def seed_colors(db):
     colors_data = [
         "Purpura", "Citrus", "Rojo", "Perla",
         "Azul", "Negro", "Gris",
     ]
     inserted = 0
     for name in colors_data:
-        existing = db.query(Color).filter(Color.name == name).first()
+        existing = (await db.execute(select(Color).where(Color.name == name))).scalars().first()
         if not existing:
             db.add(Color(name=name))
             inserted += 1
-    db.commit()
+    await db.commit()
     print(f"  ✓ Inserted {inserted} colors.")
 
 
-def seed_motorcycle_catalog(db):
-    if db.query(MotorcycleCatalog).count() > 0:
+async def seed_motorcycle_catalog(db):
+    count = (await db.execute(select(func.count()).select_from(MotorcycleCatalog))).scalar()
+    if count > 0:
         print("  → motorcycle_catalog already seeded, skipping.")
         return
 
@@ -100,87 +106,93 @@ def seed_motorcycle_catalog(db):
         MotorcycleCatalog(canonical_name="Pulsar NS400Z",       year="2025", full_price=90999.00, discount_price=86499.00),
     ]
     db.add_all(catalog_entries)
-    db.commit()
+    await db.commit()
     print(f"  ✓ Inserted {len(catalog_entries)} motorcycle catalog entries.")
 
 
-def seed_motorcycle_model_codes(db):
-    if db.query(MotorcycleModelCode).count() > 0:
+async def seed_motorcycle_model_codes(db):
+    count = (await db.execute(select(func.count()).select_from(MotorcycleModelCode))).scalar()
+    if count > 0:
         print("  → motorcycle_model_codes already seeded, skipping.")
         return
 
-    def get_catalog_id(canonical_name: str, year: str) -> int:
-        row = db.query(MotorcycleCatalog).filter(
-            MotorcycleCatalog.canonical_name == canonical_name,
-            MotorcycleCatalog.year           == year,
-        ).first()
+    async def get_catalog_id(canonical_name: str, year: str) -> int:
+        row = (await db.execute(
+            select(MotorcycleCatalog).where(
+                MotorcycleCatalog.canonical_name == canonical_name,
+                MotorcycleCatalog.year           == year,
+            )
+        )).scalars().first()
         if not row:
             raise RuntimeError(f"Catalog entry '{canonical_name}' {year} not found.")
         return row.model_id
 
     codes = [
         # Pulsar N125 FI CBS 2026
-        MotorcycleModelCode(model_id=get_catalog_id("Pulsar N125 FI-CBS", "2026"),  modelo_code="P125N-PU26DI"),
-        MotorcycleModelCode(model_id=get_catalog_id("Pulsar N125 FI-CBS", "2026"),  modelo_code="P125N-CI26DI"),
-        MotorcycleModelCode(model_id=get_catalog_id("Pulsar N125 FI-CBS", "2026"),  modelo_code="P125N-RO26DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Pulsar N125 FI-CBS", "2026"),  modelo_code="P125N-PU26DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Pulsar N125 FI-CBS", "2026"),  modelo_code="P125N-CI26DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Pulsar N125 FI-CBS", "2026"),  modelo_code="P125N-RO26DI"),
 
         # Pulsar N125 Car 2026
-        MotorcycleModelCode(model_id=get_catalog_id("Pulsar N125 Car", "2026"),     modelo_code="P125NCCI26DI"),
-        MotorcycleModelCode(model_id=get_catalog_id("Pulsar N125 Car", "2026"),     modelo_code="P125NCPU26DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Pulsar N125 Car", "2026"),     modelo_code="P125NCCI26DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Pulsar N125 Car", "2026"),     modelo_code="P125NCPU26DI"),
 
         # Pulsar N160 2026
-        MotorcycleModelCode(model_id=get_catalog_id("Pulsar N160", "2026"),         modelo_code="P160CAPE26DI"),
-        MotorcycleModelCode(model_id=get_catalog_id("Pulsar N160", "2026"),         modelo_code="P160CAAZ26DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Pulsar N160", "2026"),         modelo_code="P160CAPE26DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Pulsar N160", "2026"),         modelo_code="P160CAAZ26DI"),
 
         # Pulsar N160 Premium 2026
-        MotorcycleModelCode(model_id=get_catalog_id("Pulsar N160 Premium", "2026"), modelo_code="P160NPRO26DI"),
-        MotorcycleModelCode(model_id=get_catalog_id("Pulsar N160 Premium", "2026"), modelo_code="P160NPAZ26DI"),
-        MotorcycleModelCode(model_id=get_catalog_id("Pulsar N160 Premium", "2026"), modelo_code="P160NPNE26DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Pulsar N160 Premium", "2026"), modelo_code="P160NPRO26DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Pulsar N160 Premium", "2026"), modelo_code="P160NPAZ26DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Pulsar N160 Premium", "2026"), modelo_code="P160NPNE26DI"),
 
         # Pulsar N250 FI ABS 2026
-        MotorcycleModelCode(model_id=get_catalog_id("Pulsar N250 FI ABS", "2026"),  modelo_code="P250N-PE26DI"),
-        MotorcycleModelCode(model_id=get_catalog_id("Pulsar N250 FI ABS", "2026"),  modelo_code="P250N-RO26DI"),
-        MotorcycleModelCode(model_id=get_catalog_id("Pulsar N250 FI ABS", "2026"),  modelo_code="P250N-NE26DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Pulsar N250 FI ABS", "2026"),  modelo_code="P250N-PE26DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Pulsar N250 FI ABS", "2026"),  modelo_code="P250N-RO26DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Pulsar N250 FI ABS", "2026"),  modelo_code="P250N-NE26DI"),
 
         # Dominar 250 2026
-        MotorcycleModelCode(model_id=get_catalog_id("Dominar 250", "2026"),         modelo_code="D250UGNE26DI"),
-        MotorcycleModelCode(model_id=get_catalog_id("Dominar 250", "2026"),         modelo_code="D250UGRO26DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Dominar 250", "2026"),         modelo_code="D250UGNE26DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Dominar 250", "2026"),         modelo_code="D250UGRO26DI"),
 
         # Dominar 400 UG 2026
-        MotorcycleModelCode(model_id=get_catalog_id("Dominar 400 UG", "2026"),      modelo_code="D400UGNE26DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Dominar 400 UG", "2026"),      modelo_code="D400UGNE26DI"),
 
         # Pulsar NS200 2026
-        MotorcycleModelCode(model_id=get_catalog_id("Pulsar NS200", "2026"),        modelo_code="P200NSNE26DI"),
-        MotorcycleModelCode(model_id=get_catalog_id("Pulsar NS200", "2026"),        modelo_code="P200NSRO26DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Pulsar NS200", "2026"),        modelo_code="P200NSNE26DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Pulsar NS200", "2026"),        modelo_code="P200NSRO26DI"),
 
         # Pulsar RS200 2025
-        MotorcycleModelCode(model_id=get_catalog_id("Pulsar RS200", "2025"),        modelo_code="P200RSPE25DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Pulsar RS200", "2025"),        modelo_code="P200RSPE25DI"),
 
         # Pulsar NS400Z 2025
-        MotorcycleModelCode(model_id=get_catalog_id("Pulsar NS400Z", "2025"),       modelo_code="P400NSGR25DI"),
-        MotorcycleModelCode(model_id=get_catalog_id("Pulsar NS400Z", "2025"),       modelo_code="P400NSRO25DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Pulsar NS400Z", "2025"),       modelo_code="P400NSGR25DI"),
+        MotorcycleModelCode(model_id=await get_catalog_id("Pulsar NS400Z", "2025"),       modelo_code="P400NSRO25DI"),
     ]
     db.add_all(codes)
-    db.commit()
+    await db.commit()
     print(f"  ✓ Inserted {len(codes)} motorcycle model codes.")
 
 
-def seed_motorcycle_catalog_colors(db):
-    if db.query(MotorcycleCatalogColor).count() > 0:
+async def seed_motorcycle_catalog_colors(db):
+    count = (await db.execute(select(func.count()).select_from(MotorcycleCatalogColor))).scalar()
+    if count > 0:
         print("  -> motorcycle_catalog_colors already seeded, skipping.")
         return
 
-    def get_catalog_id(canonical_name: str, year: str) -> int:
-        row = db.query(MotorcycleCatalog).filter(
-            MotorcycleCatalog.canonical_name == canonical_name,
-            MotorcycleCatalog.year           == year,
-        ).first()
+    async def get_catalog_id(canonical_name: str, year: str) -> int:
+        row = (await db.execute(
+            select(MotorcycleCatalog).where(
+                MotorcycleCatalog.canonical_name == canonical_name,
+                MotorcycleCatalog.year           == year,
+            )
+        )).scalars().first()
         if not row:
             raise RuntimeError(f"Catalog entry '{canonical_name}' {year} not found.")
         return row.model_id
 
-    def get_color_id(name: str) -> int:
-        row = db.query(Color).filter(Color.name == name).first()
+    async def get_color_id(name: str) -> int:
+        row = (await db.execute(select(Color).where(Color.name == name))).scalars().first()
         if not row:
             raise RuntimeError(f"Color '{name}' not found — run seed_colors first.")
         return row.color_id
@@ -200,20 +212,21 @@ def seed_motorcycle_catalog_colors(db):
 
     entries = []
     for canonical_name, year, colors in color_map:
-        model_id = get_catalog_id(canonical_name, year)
+        model_id = await get_catalog_id(canonical_name, year)
         for color_name in colors:
             entries.append(MotorcycleCatalogColor(
                 model_id = model_id,
-                color_id = get_color_id(color_name),
+                color_id = await get_color_id(color_name),
             ))
 
     db.add_all(entries)
-    db.commit()
+    await db.commit()
     print(f"  ✓ Inserted {len(entries)} motorcycle catalog color entries.")
 
 
-def seed_credit_institutions(db):
-    if db.query(CreditInstitution).count() > 0:
+async def seed_credit_institutions(db):
+    count = (await db.execute(select(func.count()).select_from(CreditInstitution))).scalar()
+    if count > 0:
         print("  → credit_institutions already seeded, skipping.")
         return
 
@@ -221,25 +234,22 @@ def seed_credit_institutions(db):
         CreditInstitution(name="ANM"),
         CreditInstitution(name="Maxicash"),
     ])
-    db.commit()
+    await db.commit()
     print("  ✓ Inserted 2 credit institutions.")
 
 
-def run_seed():
-    db = SessionLocal()
-    try:
+async def seed():
+    async with AsyncSessionLocal() as db:
         print("\nSeeding database...")
-        seed_users(db)
-        seed_dealerships(db)
-        seed_credit_institutions(db)
-        seed_colors(db)
-        seed_motorcycle_catalog(db)
-        seed_motorcycle_model_codes(db)
-        seed_motorcycle_catalog_colors(db)
+        await seed_users(db)
+        await seed_dealerships(db)
+        await seed_credit_institutions(db)
+        await seed_colors(db)
+        await seed_motorcycle_catalog(db)
+        await seed_motorcycle_model_codes(db)
+        await seed_motorcycle_catalog_colors(db)
         print("\nSeed complete.\n")
-    finally:
-        db.close()
 
 
 if __name__ == "__main__":
-    run_seed()
+    asyncio.run(seed())

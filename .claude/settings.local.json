@@ -5,7 +5,18 @@
       "Bash(docker exec *)",
       "Bash(venv\\\\Scripts\\\\python.exe create_tables.py)",
       "Bash(python create_tables.py)",
-      "PowerShell(docker exec moto_app-backend-1 python /app/create_tables.py 2>&1)"
+      "PowerShell(docker exec moto_app-backend-1 python /app/create_tables.py 2>&1)",
+      "Bash(pip show *)",
+      "Bash(./venv/Scripts/python -c \"import fastapi; import sqlalchemy; print\\('fastapi:', fastapi.__version__\\); print\\('sqlalchemy:', sqlalchemy.__version__\\)\")",
+      "Bash(./venv/Scripts/pip install *)",
+      "Bash(./venv/Scripts/python -c ' *)",
+      "Bash(./venv/Scripts/python -m pytest tests/test_async_migration.py -v)",
+      "Bash(docker start *)",
+      "Bash(./venv/Scripts/python -m uvicorn main:app --port 8001 --timeout-graceful-shutdown 2)",
+      "Bash(curl -s http://localhost:8001/health)",
+      "Bash(curl -s http://localhost:8001/)",
+      "Bash(curl -s http://localhost:8001/motorcycles/)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'motorcycles: {len\\(d\\)} rows, type: {type\\(d\\).__name__}'\\)\")"
     ]
   }
 }

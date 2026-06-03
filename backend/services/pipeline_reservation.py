@@ -1,9 +1,14 @@
 from datetime import datetime, timezone
-from sqlalchemy.orm import Session
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
+
 from models.client import Client
 from models.dealership import Dealership
 from models.motorcycle_catalog import MotorcycleCatalog
+from models.motorcycle_catalog_color import MotorcycleCatalogColor
 from models.motorcycle import Motorcycle, MotorcycleStatus
 from models.event import Event, EventName, EventStatus
 from models.reservation import Reservation, ReservationStatus
@@ -17,7 +22,7 @@ from services.pipeline_utils import (
 )
 
 
-def create_reservation(db: Session, body) -> dict:
+async def create_reservation(db: AsyncSession, body) -> dict:
     """
     Full reservation creation pipeline.
     Validates all inputs, creates reservation records,
@@ -29,17 +34,26 @@ def create_reservation(db: Session, body) -> dict:
     """
     try:
         # 1. Validate client exists
-        client = db.query(Client).filter(Client.client_id == body.client_id).first()
+        result = await db.execute(
+            select(Client).where(Client.client_id == body.client_id)
+        )
+        client = result.scalar_one_or_none()
         if not client:
             raise HTTPException(
                 status_code=404,
                 detail=f"Cliente con id {body.client_id} no encontrado."
             )
 
-        # 2. Validate model exists
-        model = db.query(MotorcycleCatalog).filter(
-            MotorcycleCatalog.model_id == body.model_id
-        ).first()
+        # 2. Validate model exists (with available_colors eagerly loaded)
+        result = await db.execute(
+            select(MotorcycleCatalog)
+            .options(
+                selectinload(MotorcycleCatalog.available_colors)
+                .selectinload(MotorcycleCatalogColor.color)
+            )
+            .where(MotorcycleCatalog.model_id == body.model_id)
+        )
+        model = result.scalar_one_or_none()
         if not model:
             raise HTTPException(
                 status_code=404,
@@ -47,9 +61,10 @@ def create_reservation(db: Session, body) -> dict:
             )
 
         # 3. Validate dealership exists
-        dealership = db.query(Dealership).filter(
-            Dealership.dealership_id == body.dealership_id
-        ).first()
+        result = await db.execute(
+            select(Dealership).where(Dealership.dealership_id == body.dealership_id)
+        )
+        dealership = result.scalar_one_or_none()
         if not dealership:
             raise HTTPException(
                 status_code=404,
@@ -86,7 +101,7 @@ def create_reservation(db: Session, body) -> dict:
             seen.add(raw_color)
 
         # 6. Create Event row
-        event = create_event(db, EventName.motorcycle_reservation.value, HARDCODED_USER_ID)
+        event = await create_event(db, EventName.motorcycle_reservation.value, HARDCODED_USER_ID)
 
         # 7. Create Reservation row
         reservation = Reservation(
@@ -97,40 +112,44 @@ def create_reservation(db: Session, body) -> dict:
             status         = ReservationStatus.active,
             created_by     = HARDCODED_USER_ID,
             event_id       = event.event_id,
-            created_at     = datetime.now(timezone.utc),
+            created_at = datetime.now(timezone.utc).replace(tzinfo=None),
+
         )
         db.add(reservation)
-        db.flush()
+        await db.flush()
 
-        # 8. Create ReservationColor rows (priority = index, first = highest priority)
+        # 8. Create ReservationColor rows
         for priority, raw_color in enumerate(body.colors, start=1):
-            color_obj = db.query(Color).filter(Color.name == raw_color).first()
+            result = await db.execute(
+                select(Color).where(Color.name == raw_color)
+            )
+            color_obj = result.scalar_one_or_none()
             db.add(ReservationColor(
                 reservation_id = reservation.reservation_id,
                 color_id       = color_obj.color_id,
                 priority       = priority,
             ))
-        db.flush()
+        await db.flush()
 
         # 9. Mark event complete and link entity
         event.status             = EventStatus.complete
-        event.completed_at       = datetime.now(timezone.utc)
+        event.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         event.linked_entity_type = "RESERVATION"
         event.linked_entity_id   = reservation.reservation_id
 
         # 10. Trigger A — auto-assign against incoming unassigned pool
-        # Query only incoming motos for this dealership that are not
-        # yet assigned to any reservation. The model matching and color
-        # priority logic is handled inside _auto_assign_reservations().
-        incoming_pool = db.query(Motorcycle).filter(
-            Motorcycle.dealership_id  == body.dealership_id,
-            Motorcycle.status         == MotorcycleStatus.incoming,
-            Motorcycle.reservation_id == None,
-        ).all()
+        result = await db.execute(
+            select(Motorcycle).where(
+                Motorcycle.dealership_id  == body.dealership_id,
+                Motorcycle.status         == MotorcycleStatus.incoming,
+                Motorcycle.reservation_id == None,
+            )
+        )
+        incoming_pool = result.scalars().all()
 
         assigned = False
         if incoming_pool:
-            assignment_results = _auto_assign_reservations(
+            assignment_results = await _auto_assign_reservations(
                 db, body.dealership_id, incoming_pool
             )
             _print_reservation_assignment_results(assignment_results)
@@ -141,7 +160,7 @@ def create_reservation(db: Session, body) -> dict:
             )
 
         # 11. Commit everything atomically
-        db.commit()
+        await db.commit()
 
         status_label = "assigned" if assigned else "active"
         message = f"Reservación registrada. ID: {reservation.reservation_id}."
@@ -159,8 +178,8 @@ def create_reservation(db: Session, body) -> dict:
         }
 
     except HTTPException:
-        db.rollback()
+        await db.rollback()
         raise
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         return {"success": False, "message": str(e)}

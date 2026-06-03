@@ -2,12 +2,15 @@ from typing import List
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from database import get_db
 from models.client import Client
 from models.dealership import Dealership
 from models.motorcycle_catalog import MotorcycleCatalog
+from models.motorcycle_catalog_color import MotorcycleCatalogColor
 from services.pipeline_reservation import create_reservation
 
 router = APIRouter(prefix="/reservations", tags=["reservations"])
@@ -18,8 +21,11 @@ router = APIRouter(prefix="/reservations", tags=["reservations"])
 # ======================================================================== #
 
 @router.get("/clients")
-def get_clients(db: Session = Depends(get_db)):
-    clients = db.query(Client).order_by(Client.nombre_completo).all()
+async def get_clients(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Client).order_by(Client.nombre_completo)
+    )
+    clients = result.scalars().all()
     return [
         {
             "client_id":       c.client_id,
@@ -35,8 +41,11 @@ def get_clients(db: Session = Depends(get_db)):
 # ======================================================================== #
 
 @router.get("/dealerships")
-def get_dealerships(db: Session = Depends(get_db)):
-    dealerships = db.query(Dealership).order_by(Dealership.name).all()
+async def get_dealerships(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Dealership).order_by(Dealership.name)
+    )
+    dealerships = result.scalars().all()
     return [
         {
             "dealership_id": d.dealership_id,
@@ -51,12 +60,16 @@ def get_dealerships(db: Session = Depends(get_db)):
 # ======================================================================== #
 
 @router.get("/models")
-def get_models(db: Session = Depends(get_db)):
-    models = (
-        db.query(MotorcycleCatalog)
+async def get_models(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(MotorcycleCatalog)
+        .options(
+            selectinload(MotorcycleCatalog.available_colors)
+            .selectinload(MotorcycleCatalogColor.color)
+        )
         .order_by(MotorcycleCatalog.canonical_name.asc(), MotorcycleCatalog.year.desc())
-        .all()
     )
+    models = result.scalars().all()
     return [
         {
             "model_id":       m.model_id,
@@ -81,8 +94,8 @@ class ReservationCreate(BaseModel):
 
 
 @router.post("/create")
-def create_reservation_endpoint(
+async def create_reservation_endpoint(
     body: ReservationCreate,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
-    return create_reservation(db, body)
+    return await create_reservation(db, body)

@@ -22,15 +22,15 @@ from models.reservation_color           import ReservationColor                 
 from models.motorcycle                  import Motorcycle                            # noqa: F401
 from models.credit_institution          import CreditInstitution                      # noqa: F401
 from models.contract                    import Contract                               # noqa: F401
+import asyncio
 
-
-def create_all_tables():
+async def create_all_tables():
     print("Creating tables...")
-    Base.metadata.create_all(bind=engine)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     print("Done. Tables created:")
     for table_name in Base.metadata.tables.keys():
         print(f"  ✓ {table_name}")
 
-
 if __name__ == "__main__":
-    create_all_tables()
+    asyncio.run(create_all_tables())

@@ -1,7 +1,9 @@
 import os
 import shutil
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from config import STORAGE_ROOT
 from models.event import Event
@@ -23,6 +25,8 @@ from services.pipeline_utils import (
     is_valid_cantidad,
     mark_complete,
 )
+
+
 # ======================================================================== #
 # Prompt                                                                    #
 # ======================================================================== #
@@ -39,14 +43,12 @@ STEP 1 — EXTRACT HEADER FIELDS
 Find these two fields in the header lines at the top of the text:
 
 - "sucursal": the value that appears after "Sucursal :" on the same line.
-  That line also contains "Nombre del documento :" followed by a document code.
   Extract ONLY the dealership name — stop before "Nombre del documento".
   Example: from "Sucursal : BAJAJ TLALPIZAHUAC Nombre del documento : VPOC000..."
   extract only "BAJAJ TLALPIZAHUAC"
 
 - "fecha_documento": the date that appears after "Fecha del documento :" on the
-  same line. That line also contains "No. de Referencia :".
-  Format the date as DD/MM/YY.
+  same line. Format the date as DD/MM/YY.
   Example: "29-04-2026" → "29/04/26"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -78,11 +80,8 @@ HOW TO IDENTIFY CANTIDAD:
 LINES TO SKIP COMPLETELY:
 - Any line that does not contain a MODELO code ending in [digits]DI
 - Lines containing only numbers, decimals, or commas with no letters
-  Example: "11,489.5" or "4" — these are financial overflow lines, skip them
 - The header line: "S. NO. Modelo Nombre del Modelo Cantidad Descuento..."
-- The header line: "Precio Cantidad" or "Unitario Cancelada"
-- Footer lines: "TOTAL AMOUNT", "Importe en Palabras", "Firma", "Printed On",
-  "Por ANAYELI", "THANKS FOR DOING"
+- Footer lines: "TOTAL AMOUNT", "Importe en Palabras", "Firma", "Printed On"
 
 EXTRACTION PROCESS — repeat for every valid row:
 1. Find the next line that contains a MODELO code (ends in [digits]DI, no spaces)
@@ -109,66 +108,47 @@ Return this exact JSON and nothing else:
 }
 
 overall_confidence: float between 0.0 and 1.0.
-Since you are reading clean extracted text, confidence should be high when
-all rows and header fields are clearly identifiable.
 Set below 0.75 ONLY if the sucursal field is missing or any modelo code
 cannot be identified with certainty.
-Lines containing only numbers that appear between data rows are financial
-overflow lines and should NOT lower your confidence.
 
 DOCUMENT TEXT:
 """
+
 
 # ======================================================================== #
 # Pipeline                                                                  #
 # ======================================================================== #
 
-def handle_purchase_order(
-    db: Session,
+async def handle_purchase_order(
+    db: AsyncSession,
     submission: Submission,
     event: Event,
 ) -> tuple[bool, str]:
     """
     Pipeline for purchase_order event.
-    1.  Load PDF bytes from disk.
-    2.  Call Gemini for extraction.
-    3.  Validate confidence and required fields.
-    4.  Structural validation of extracted modelo codes and cantidades.
-    5.  Look up catalog entries — hard stop if any code not in DB.
-    6.  Match sucursal to dealership_id.
-    7.  Copy PDF to purchase_documents/raw/.
-    8.  Create PurchaseDocument row.
-    9.  Create one Motorcycle row per unit (quantity expansion).
-    10. Mark submission and event complete.
     """
 
-    # ------------------------------------------------------------------ #
-    # 1. Load PDF bytes from disk                                         #
-    # ------------------------------------------------------------------ #
+    # 1. Load PDF bytes from disk
     if not submission.raw_file_path or not os.path.exists(submission.raw_file_path):
-        return reject_and_return(db, submission, event, "Archivo PDF no encontrado en disco.")
+        return await reject_and_return(db, submission, event, "Archivo PDF no encontrado en disco.")
 
     with open(submission.raw_file_path, "rb") as f:
         pdf_bytes = f.read()
 
     raw_text = extract_raw_pdf_text(pdf_bytes)
 
-    # ------------------------------------------------------------------ #
-    # 2. Call Gemini                                                       #
-    # ------------------------------------------------------------------ #
+    # 2. Call Gemini
     model  = get_model()
     prompt = _build_purchase_prompt()
 
     try:
-        raw_response, parsed_dict = call_gemini_text(model, prompt, raw_text)
+        raw_response, parsed_dict = await call_gemini_text(model, prompt, raw_text)
     except ValueError as e:
         reason = f"Error al procesar respuesta de IA: {e}"
-        log_ai(db, submission.submission_id, "extraction", str(e), None, None, False)
-        return reject_and_return(db, submission, event, reason)
+        await log_ai(db, submission.submission_id, "extraction", str(e), None, None, False)
+        return await reject_and_return(db, submission, event, reason)
 
-    # ------------------------------------------------------------------ #
-    # 3. Validate confidence and required fields                          #
-    # ------------------------------------------------------------------ #
+    # 3. Validate confidence and required fields
     confidence       = parsed_dict.get("overall_confidence")
     sucursal         = parsed_dict.get("sucursal")
     fecha            = parsed_dict.get("fecha_documento")
@@ -176,7 +156,7 @@ def handle_purchase_order(
 
     print(f"[GEMINI CONFIDENCE] {confidence}")
 
-    ok, msg = check_confidence(
+    ok, msg = await check_confidence(
         db, submission, event, confidence,
         "extraction", raw_response, parsed_dict,
     )
@@ -184,15 +164,13 @@ def handle_purchase_order(
 
     if not sucursal:
         reason = "No se pudo extraer el campo Sucursal del documento."
-        return reject_and_return(db, submission, event, reason)
+        return await reject_and_return(db, submission, event, reason)
 
     if not motorcycles_data:
         reason = "No se encontraron motocicletas en el documento."
-        return reject_and_return(db, submission, event, reason)
+        return await reject_and_return(db, submission, event, reason)
 
-    # ------------------------------------------------------------------ #
-    # 4. Structural validation of extracted modelo codes and cantidades   #
-    # ------------------------------------------------------------------ #
+    # 4. Structural validation of extracted modelo codes and cantidades
     for i, moto in enumerate(motorcycles_data):
         code     = moto.get("modelo", "")
         cantidad = moto.get("cantidad")
@@ -202,24 +180,24 @@ def handle_purchase_order(
                 f"esperado. Debe tener exactamente 12 caracteres, contener solo "
                 f"letras, números y guiones, y terminar en dos dígitos seguidos de 'DI'."
             )
-            return reject_and_return(db, submission, event, reason)
+            return await reject_and_return(db, submission, event, reason)
         if not is_valid_cantidad(cantidad):
             reason = (
                 f"Fila {i + 1}: la cantidad '{cantidad}' no es válida. "
                 f"Debe ser un número entero entre 1 y 99."
             )
-            return reject_and_return(db, submission, event, reason)
+            return await reject_and_return(db, submission, event, reason)
 
-    # ------------------------------------------------------------------ #
-    # 5. Look up catalog entries — hard stop if any code not in DB        #
-    # ------------------------------------------------------------------ #
+    # 5. Look up catalog entries — hard stop if any code not in DB
     resolved = []
     for moto in motorcycles_data:
         code = moto["modelo"]
-        code_entry = db.query(MotorcycleModelCode).filter(
-            MotorcycleModelCode.modelo_code == code
-        ).first()
-
+        result = await db.execute(
+            select(MotorcycleModelCode)
+            .options(selectinload(MotorcycleModelCode.model))
+            .where(MotorcycleModelCode.modelo_code == code)
+        )
+        code_entry = result.scalar_one_or_none()
         catalog_entry = code_entry.model if code_entry else None
 
         if not catalog_entry:
@@ -227,27 +205,24 @@ def handle_purchase_order(
                 f"El código '{code}' no existe en el catálogo de modelos. "
                 f"Por favor actualiza el catálogo antes de procesar este pedido."
             )
-            return reject_and_return(db, submission, event, reason)
+            return await reject_and_return(db, submission, event, reason)
 
         resolved.append({**moto, "catalog_entry": catalog_entry})
 
-    # ------------------------------------------------------------------ #
-    # 6. Match sucursal to dealership                                     #
-    # ------------------------------------------------------------------ #
-    dealership = db.query(Dealership).filter(
-        Dealership.name == sucursal
-    ).first()
+    # 6. Match sucursal to dealership
+    result = await db.execute(
+        select(Dealership).where(Dealership.name == sucursal)
+    )
+    dealership = result.scalar_one_or_none()
 
     if not dealership:
         reason = (
             f"Sucursal '{sucursal}' no encontrada en el sistema. "
             f"Verifica el catálogo de sucursales."
         )
-        return reject_and_return(db, submission, event, reason)
+        return await reject_and_return(db, submission, event, reason)
 
-    # ------------------------------------------------------------------ #
-    # 7. Copy PDF to purchase_documents/raw/                              #
-    # ------------------------------------------------------------------ #
+    # 7. Copy PDF to purchase_documents/raw/
     dest_folder = os.path.join(STORAGE_ROOT, "purchase_documents", "raw")
     os.makedirs(dest_folder, exist_ok=True)
     dest_path = os.path.join(
@@ -258,11 +233,9 @@ def handle_purchase_order(
         shutil.copy2(submission.raw_file_path, dest_path)
     except Exception as e:
         reason = f"Error al guardar el archivo: {e}"
-        return reject_and_return(db, submission, event, reason)
+        return await reject_and_return(db, submission, event, reason)
 
-    # ------------------------------------------------------------------ #
-    # 8. Count total units and create PurchaseDocument row               #
-    # ------------------------------------------------------------------ #
+    # 8. Count total units and create PurchaseDocument row
     total_units = sum(
         int(m.get("cantidad", 0))
         for m in resolved
@@ -270,17 +243,15 @@ def handle_purchase_order(
     )
 
     purchase_doc = PurchaseDocument(
-        submission_id        = submission.submission_id,
-        dealership_id        = dealership.dealership_id,
-        order_date           = fecha,
-        total_units          = total_units,
+        submission_id = submission.submission_id,
+        dealership_id = dealership.dealership_id,
+        order_date    = fecha,
+        total_units   = total_units,
     )
     db.add(purchase_doc)
-    db.flush()
+    await db.flush()
 
-    # ------------------------------------------------------------------ #
-    # 9. Create one Motorcycle row per unit (quantity expansion)          #
-    # ------------------------------------------------------------------ #
+    # 9. Create one Motorcycle row per unit (quantity expansion)
     for moto in resolved:
         cantidad      = int(moto.get("cantidad", 0))
         catalog_entry = moto["catalog_entry"]
@@ -293,10 +264,8 @@ def handle_purchase_order(
             )
             db.add(motorcycle)
 
-    # ------------------------------------------------------------------ #
-    # 10. Mark submission and event complete                              #
-    # ------------------------------------------------------------------ #
-    mark_complete(
+    # 10. Mark submission and event complete
+    await mark_complete(
         db, submission, event,
         "PURCHASE_DOCUMENT", purchase_doc.purchase_document_id,
     )

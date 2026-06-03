@@ -5,7 +5,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import joinedload, selectinload
 
 from database import get_db
 from config import CONTRACTS_STORAGE_PATH, SALE_LOCK_MINUTES
@@ -34,8 +36,11 @@ router = APIRouter(prefix="/sales", tags=["sales"])
 # ======================================================================== #
 
 @router.get("/clients")
-def get_clients(db: Session = Depends(get_db)):
-    clients = db.query(Client).order_by(Client.nombre_completo.asc()).all()
+async def get_clients(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Client).order_by(Client.nombre_completo.asc())
+    )
+    clients = result.scalars().all()
     return [
         {
             "client_id":       c.client_id,
@@ -53,60 +58,64 @@ def get_clients(db: Session = Depends(get_db)):
 # ======================================================================== #
 
 @router.get("/motorcycles")
-def get_motorcycles(client_id: Optional[int] = None,
-                    db: Session = Depends(get_db)):
+async def get_motorcycles(client_id: Optional[int] = None,
+                          db: AsyncSession = Depends(get_db)):
 
     # Lazy unlock — release any expired sale locks
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=SALE_LOCK_MINUTES)
-    expired = db.query(Motorcycle).filter(
-        Motorcycle.status    == MotorcycleStatus.reserved_for_sale,
-        Motorcycle.locked_at <= cutoff,
-    ).all()
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=SALE_LOCK_MINUTES)
+    result = await db.execute(
+        select(Motorcycle).where(
+            Motorcycle.status    == MotorcycleStatus.reserved_for_sale,
+            Motorcycle.locked_at <= cutoff,
+        )
+    )
+    expired = result.scalars().all()
     for moto in expired:
         moto.status          = MotorcycleStatus(moto.previous_status or "in_stock")
         moto.previous_status = None
         moto.locked_at       = None
     if expired:
-        db.commit()
+        await db.commit()
 
     # STEP A — Find client's reserved motorcycle
     reserved_moto_id = None
     if client_id:
-        reservation = (
-            db.query(Reservation)
-            .filter(
+        result = await db.execute(
+            select(Reservation)
+            .options(selectinload(Reservation.motorcycle))
+            .where(
                 Reservation.client_id == client_id,
                 Reservation.status    == ReservationStatus.assigned,
             )
             .order_by(Reservation.created_at.asc())
-            .first()
         )
+        reservation = result.scalar_one_or_none()
         if reservation and reservation.motorcycle:
             moto = reservation.motorcycle
             if moto.status == MotorcycleStatus.in_stock_reserved:
                 reserved_moto_id = moto.motorcycle_id
 
     # STEP B — Query available in_stock motorcycles
-    available = (
-        db.query(Motorcycle)
+    result = await db.execute(
+        select(Motorcycle)
         .options(
             joinedload(Motorcycle.dealership),
             joinedload(Motorcycle.model),
         )
-        .filter(Motorcycle.status == MotorcycleStatus.in_stock)
-        .all()
+        .where(Motorcycle.status == MotorcycleStatus.in_stock)
     )
+    available = result.unique().scalars().all()
 
     if reserved_moto_id:
-        reserved_moto = (
-            db.query(Motorcycle)
+        result = await db.execute(
+            select(Motorcycle)
             .options(
                 joinedload(Motorcycle.dealership),
                 joinedload(Motorcycle.model),
             )
-            .filter(Motorcycle.motorcycle_id == reserved_moto_id)
-            .first()
+            .where(Motorcycle.motorcycle_id == reserved_moto_id)
         )
+        reserved_moto = result.unique().scalar_one_or_none()
         if reserved_moto:
             available = [reserved_moto] + [
                 m for m in available
@@ -137,12 +146,11 @@ def get_motorcycles(client_id: Optional[int] = None,
 # ======================================================================== #
 
 @router.get("/credit-institutions")
-def get_credit_institutions(db: Session = Depends(get_db)):
-    institutions = (
-        db.query(CreditInstitution)
-        .order_by(CreditInstitution.name.asc())
-        .all()
+async def get_credit_institutions(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(CreditInstitution).order_by(CreditInstitution.name.asc())
     )
+    institutions = result.scalars().all()
     return [
         {
             "credit_institution_id": i.credit_institution_id,
@@ -162,29 +170,29 @@ class LockMotorcycleBody(BaseModel):
 
 
 @router.post("/lock-motorcycle")
-def lock_motorcycle(body: LockMotorcycleBody, db: Session = Depends(get_db)):
+async def lock_motorcycle(body: LockMotorcycleBody, db: AsyncSession = Depends(get_db)):
     try:
         # 1. Unlock previous motorcycle if provided
         if body.previous_motorcycle_id:
-            prev = (
-                db.query(Motorcycle)
-                .filter(
+            result = await db.execute(
+                select(Motorcycle)
+                .where(
                     Motorcycle.motorcycle_id == body.previous_motorcycle_id,
                     Motorcycle.status        == MotorcycleStatus.reserved_for_sale,
                 )
                 .with_for_update()
-                .first()
             )
+            prev = result.scalar_one_or_none()
             if prev:
                 prev.status          = MotorcycleStatus(prev.previous_status or "in_stock")
                 prev.previous_status = None
                 prev.locked_at       = None
-                db.flush()
+                await db.flush()
 
         # 2. Lock new motorcycle
-        moto = (
-            db.query(Motorcycle)
-            .filter(
+        result = await db.execute(
+            select(Motorcycle)
+            .where(
                 Motorcycle.motorcycle_id == body.motorcycle_id,
                 Motorcycle.status.in_([
                     MotorcycleStatus.in_stock,
@@ -192,20 +200,20 @@ def lock_motorcycle(body: LockMotorcycleBody, db: Session = Depends(get_db)):
                 ]),
             )
             .with_for_update()
-            .first()
         )
+        moto = result.scalar_one_or_none()
         if not moto:
-            db.rollback()
+            await db.rollback()
             return {"success": False,
                     "message": "Esta motocicleta ya no está disponible."}
 
-        now                  = datetime.now(timezone.utc)
+        now                  = datetime.now(timezone.utc).replace(tzinfo=None)
         moto.previous_status = moto.status.value
         moto.status          = MotorcycleStatus.reserved_for_sale
         moto.locked_at       = now
-        db.flush()
+        await db.flush()
 
-        db.commit()
+        await db.commit()
         return {
             "success":       True,
             "motorcycle_id": body.motorcycle_id,
@@ -213,7 +221,7 @@ def lock_motorcycle(body: LockMotorcycleBody, db: Session = Depends(get_db)):
         }
 
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         return {"success": False, "message": str(e)}
 
 
@@ -226,12 +234,15 @@ class UnlockMotorcycleBody(BaseModel):
 
 
 @router.post("/unlock-motorcycle")
-def unlock_motorcycle(body: UnlockMotorcycleBody, db: Session = Depends(get_db)):
+async def unlock_motorcycle(body: UnlockMotorcycleBody, db: AsyncSession = Depends(get_db)):
     try:
-        moto = db.query(Motorcycle).filter(
-            Motorcycle.motorcycle_id == body.motorcycle_id,
-            Motorcycle.status        == MotorcycleStatus.reserved_for_sale,
-        ).first()
+        result = await db.execute(
+            select(Motorcycle).where(
+                Motorcycle.motorcycle_id == body.motorcycle_id,
+                Motorcycle.status        == MotorcycleStatus.reserved_for_sale,
+            )
+        )
+        moto = result.scalar_one_or_none()
         if not moto:
             return {"success": True}
 
@@ -239,11 +250,11 @@ def unlock_motorcycle(body: UnlockMotorcycleBody, db: Session = Depends(get_db))
         moto.previous_status = None
         moto.locked_at       = None
 
-        db.commit()
+        await db.commit()
         return {"success": True}
 
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         return {"success": False, "message": str(e)}
 
 
@@ -269,41 +280,44 @@ class SaleCreateBody(BaseModel):
 
 
 @router.post("/create")
-def create_sale(body: SaleCreateBody, db: Session = Depends(get_db)):
+async def create_sale(body: SaleCreateBody, db: AsyncSession = Depends(get_db)):
     try:
         # 1. Validate client
-        client = db.query(Client).filter(
-            Client.client_id == body.client_id
-        ).first()
+        result = await db.execute(
+            select(Client).where(Client.client_id == body.client_id)
+        )
+        client = result.scalar_one_or_none()
         if not client:
             return {"success": False,
                     "message": f"Cliente con id {body.client_id} no encontrado."}
 
         # 2. Validate motorcycle is locked for sale (SELECT FOR UPDATE)
-        moto = (
-            db.query(Motorcycle)
-            .filter(
+        result = await db.execute(
+            select(Motorcycle)
+            .where(
                 Motorcycle.motorcycle_id == body.motorcycle_id,
                 Motorcycle.status        == MotorcycleStatus.reserved_for_sale,
             )
             .with_for_update()
-            .first()
         )
+        moto = result.scalar_one_or_none()
         if not moto:
             return {"success": False,
                     "message": "Esta motocicleta ya no está disponible. "
                                "Por favor selecciónala nuevamente."}
 
         # 3. Get dealership
-        dealership = moto.dealership
+        result = await db.execute(
+            select(Dealership).where(Dealership.dealership_id == moto.dealership_id)
+        )
+        dealership = result.scalar_one()
 
         # 4. Generate contract number
-        contract_number = generate_contract_number(
-            db, dealership.dealership_id)
+        contract_number = await generate_contract_number(db, dealership.dealership_id)
 
         # 5. Create Event row
-        now   = datetime.now(timezone.utc)
-        event = create_event(db, EventName.sale_validation.value, HARDCODED_USER_ID)
+        now   = datetime.now(timezone.utc).replace(tzinfo=None)
+        event = await create_event(db, EventName.sale_validation.value, HARDCODED_USER_ID)
 
         # 6. Create Contract row
         contract = Contract(
@@ -328,26 +342,40 @@ def create_sale(body: SaleCreateBody, db: Session = Depends(get_db)):
             created_at             = now,
         )
         db.add(contract)
-        db.flush()
+        await db.flush()
 
-        # 7. Generate documents
-        generate_documents(contract, db)
+        # 7. Reload contract with all relationships for generate_documents
+        result = await db.execute(
+            select(Contract)
+            .options(
+                selectinload(Contract.client),
+                selectinload(Contract.motorcycle).selectinload(Motorcycle.model),
+                selectinload(Contract.dealership),
+                selectinload(Contract.employee),
+                selectinload(Contract.institution),
+            )
+            .where(Contract.contract_id == contract.contract_id)
+        )
+        loaded_contract = result.scalar_one()
 
-        # 8. Mark motorcycle sold, clear lock fields
+        # 8. Generate documents
+        await generate_documents(loaded_contract, db)
+
+        # 9. Mark motorcycle sold, clear lock fields
         moto.status          = MotorcycleStatus.sold
         moto.previous_status = None
         moto.locked_at       = None
-        db.flush()
+        await db.flush()
 
-        # 9. Complete event
+        # 10. Complete event
         event.status             = EventStatus.complete
         event.completed_at       = now
         event.linked_entity_type = "CONTRACT"
         event.linked_entity_id   = contract.contract_id
-        db.flush()
+        await db.flush()
 
-        # 10. Commit
-        db.commit()
+        # 11. Commit
+        await db.commit()
 
         return {
             "success":         True,
@@ -358,7 +386,7 @@ def create_sale(body: SaleCreateBody, db: Session = Depends(get_db)):
         }
 
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         return {"success": False, "message": str(e)}
 
 
@@ -367,10 +395,11 @@ def create_sale(body: SaleCreateBody, db: Session = Depends(get_db)):
 # ======================================================================== #
 
 @router.get("/{contract_id}/download/contrato")
-def download_contrato(contract_id: int, db: Session = Depends(get_db)):
-    contract = db.query(Contract).filter(
-        Contract.contract_id == contract_id
-    ).first()
+async def download_contrato(contract_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Contract).where(Contract.contract_id == contract_id)
+    )
+    contract = result.scalar_one_or_none()
     if not contract:
         raise HTTPException(status_code=404, detail="Contrato no encontrado.")
 
@@ -394,10 +423,11 @@ def download_contrato(contract_id: int, db: Session = Depends(get_db)):
 # ======================================================================== #
 
 @router.get("/{contract_id}/download/solicitud")
-def download_solicitud(contract_id: int, db: Session = Depends(get_db)):
-    contract = db.query(Contract).filter(
-        Contract.contract_id == contract_id
-    ).first()
+async def download_solicitud(contract_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Contract).where(Contract.contract_id == contract_id)
+    )
+    contract = result.scalar_one_or_none()
     if not contract:
         raise HTTPException(status_code=404, detail="Contrato no encontrado.")
 

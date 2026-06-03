@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from database import get_db
 from models.motorcycle import Motorcycle
@@ -10,14 +11,14 @@ router = APIRouter(prefix="/motorcycles", tags=["motorcycles"])
 
 
 @router.get("/")
-def list_motorcycles(db: Session = Depends(get_db)):
-    rows = (
-        db.query(Motorcycle, MotorcycleCatalog, Dealership)
+async def list_motorcycles(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Motorcycle, MotorcycleCatalog, Dealership)
         .outerjoin(MotorcycleCatalog, Motorcycle.model_id == MotorcycleCatalog.model_id)
         .outerjoin(Dealership, Motorcycle.dealership_id == Dealership.dealership_id)
         .order_by(Motorcycle.created_at.desc())
-        .all()
     )
+    rows = result.all()
     return [
         {
             "motorcycle_id": m.motorcycle_id,

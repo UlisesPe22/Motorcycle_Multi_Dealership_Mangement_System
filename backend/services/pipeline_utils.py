@@ -9,14 +9,15 @@ building blocks (reject_and_return, check_confidence, mark_complete).
 import io
 import os
 import re
-import shutil
 import cv2
 import numpy as np
 from PIL import Image
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from config import MODEL_NAME, CONFIDENCE_THRESHOLD
 from models.event import Event, EventStatus
@@ -93,18 +94,6 @@ def warp_and_save(
     """
     Load raw image, apply perspective warp using Gemini corners,
     resize to canonical 1012x638, save to output_path.
-
-    Args:
-        raw_image_path: path to the original uploaded scan
-        corners:        dict with top_left/top_right/bottom_right/bottom_left
-                        in normalised 0-1000 coordinates
-        output_path:    where to save the normalised image
-
-    Returns:
-        output_path on success
-
-    Raises:
-        ValueError if warp fails
     """
     pil_img = load_image_as_pil(raw_image_path)
     cv2_img = pil_to_cv2(pil_img)
@@ -136,7 +125,6 @@ def extract_raw_pdf_text(pdf_bytes: bytes) -> str:
     """
     Extracts all text from PDF bytes using pdfplumber, preserving spaces
     and line breaks so Gemini can read the document as structured text.
-    Returns the concatenated text of all pages separated by newlines.
     """
     import pdfplumber
 
@@ -153,7 +141,6 @@ def extract_clean_pdf_text(pdf_bytes: bytes) -> str:
     """
     Extracts all text from PDF bytes using pdfplumber.
     Strips all whitespace and uppercases for reliable string matching.
-    Returns a single clean string — the ground truth from the document.
     """
     import pdfplumber
 
@@ -171,8 +158,6 @@ def _levenshtein(s1: str, s2: str) -> int:
     """
     Full Levenshtein distance — handles strings of unequal length.
     For equal-length strings this reduces to Hamming distance.
-    Used instead of Hamming because Gemini occasionally returns
-    strings of unexpected length from delivery documents.
     """
     if s1 == s2:
         return 0
@@ -194,18 +179,12 @@ def _levenshtein(s1: str, s2: str) -> int:
         prev = curr
     return prev[-1]
 
+
 # ======================================================================== #
 # Structural regex validators                                               #
 # ======================================================================== #
 
 def is_valid_modelo_code(code: str) -> bool:
-    """
-    Modelo codes must be:
-    - Exactly 12 characters total
-    - Contain only letters (A-Z), numbers (0-9), and hyphens (-)
-    - Always end in exactly two digits followed by DI
-    - Examples: P160CAPE26DI, P250N-PE26DI, D400UGNE26DI
-    """
     cleaned = code.strip().upper()
     return (
         len(cleaned) == 12
@@ -214,29 +193,14 @@ def is_valid_modelo_code(code: str) -> bool:
 
 
 def is_valid_cantidad(cantidad) -> bool:
-    """
-    Cantidad must be a positive integer between 1 and 99 inclusive.
-    """
     return isinstance(cantidad, int) and 1 <= cantidad <= 99
 
 
 def is_valid_serie(serie: str) -> bool:
-    """
-    NO. DE SERIE must be:
-    - Exactly 17 characters
-    - Only letters (A-Z) and numbers (0-9)
-    - No spaces, hyphens, dots, or special characters
-    """
     return bool(re.match(r'^[A-Z0-9]{17}$', serie.strip().upper()))
 
 
 def is_valid_motor(motor: str) -> bool:
-    """
-    NO. DE MOTOR must be:
-    - Exactly 11 characters
-    - Only letters (A-Z) and numbers (0-9)
-    - No spaces, hyphens, dots, or special characters
-    """
     return bool(re.match(r'^[A-Z0-9]{11}$', motor.strip().upper()))
 
 
@@ -244,8 +208,8 @@ def is_valid_motor(motor: str) -> bool:
 # AI logging and submission/event state helpers                             #
 # ======================================================================== #
 
-def log_ai(
-    db: Session,
+async def log_ai(
+    db: AsyncSession,
     submission_id: int,
     step_name: str,
     raw_response: str,
@@ -264,28 +228,28 @@ def log_ai(
         success=success,
     )
     db.add(log)
-    db.flush()
+    await db.flush()
     return log
 
 
-def reject_submission(db: Session, submission: Submission, reason: str):
+async def reject_submission(db: AsyncSession, submission: Submission, reason: str):
     submission.status = SubmissionStatus.rejected
     submission.rejection_reason = reason
-    db.flush()
+    await db.flush()
 
 
-def reject_event(db: Session, event: Event, reason: str):
+async def reject_event(db: AsyncSession, event: Event, reason: str):
     event.status = EventStatus.rejected
-    event.completed_at = datetime.now(timezone.utc)
-    db.flush()
+    event.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.flush()
 
 
 # ======================================================================== #
 # Reusable pipeline building blocks                                         #
 # ======================================================================== #
 
-def reject_and_return(
-    db: Session,
+async def reject_and_return(
+    db: AsyncSession,
     submission: Submission,
     event: Event,
     reason: str,
@@ -293,16 +257,15 @@ def reject_and_return(
     """
     Calls reject_submission(), reject_event(), db.commit(),
     and returns (False, reason).
-    Replaces the 4-line block that appears across pipelines.
     """
-    reject_submission(db, submission, reason)
-    reject_event(db, event, reason)
-    db.commit()
+    await reject_submission(db, submission, reason)
+    await reject_event(db, event, reason)
+    await db.commit()
     return False, reason
 
 
-def check_confidence(
-    db: Session,
+async def check_confidence(
+    db: AsyncSession,
     submission: Submission,
     event: Event,
     confidence: Optional[float],
@@ -314,9 +277,8 @@ def check_confidence(
     Logs the AI call result and checks confidence against CONFIDENCE_THRESHOLD.
     If confidence is None or below threshold, calls reject_and_return.
     Returns (True, "") if confidence is acceptable.
-    Returns (False, reason) if not.
     """
-    log_ai(
+    await log_ai(
         db,
         submission.submission_id,
         step_name,
@@ -330,12 +292,12 @@ def check_confidence(
             f"Confianza insuficiente ({confidence}). "
             f"Por favor sube un archivo más claro."
         )
-        return reject_and_return(db, submission, event, reason)
+        return await reject_and_return(db, submission, event, reason)
     return True, ""
 
 
-def _auto_assign_reservations(
-    db: Session,
+async def _auto_assign_reservations(
+    db: AsyncSession,
     dealership_id: int,
     incoming_pool: list,
 ) -> list[dict]:
@@ -343,22 +305,25 @@ def _auto_assign_reservations(
     Tries to assign active reservations to a pool of newly-incoming motorcycles.
     Processes reservations oldest-first. For each reservation, filters pool by
     model then attempts color preferences in priority order (case-insensitive).
-    On a match: sets moto.status=incoming_reserved, moto.reservation_id,
-    reservation.status=assigned, flushes. Returns list of result dicts.
     """
     from models.reservation import Reservation, ReservationStatus
     from models.reservation_color import ReservationColor
     from models.motorcycle import MotorcycleStatus
 
-    active_reservations = (
-        db.query(Reservation)
-        .filter(
+    result = await db.execute(
+        select(Reservation)
+        .options(
+            selectinload(Reservation.client),
+            selectinload(Reservation.colors).selectinload(ReservationColor.color),
+            selectinload(Reservation.model),
+        )
+        .where(
             Reservation.dealership_id == dealership_id,
-            Reservation.status        == ReservationStatus.active,
+            Reservation.status == ReservationStatus.active,
         )
         .order_by(Reservation.created_at.asc())
-        .all()
     )
+    active_reservations = result.scalars().all()
 
     assigned_moto_ids = set()
     results = []
@@ -404,7 +369,7 @@ def _auto_assign_reservations(
             matched_moto.reservation_id = reservation.reservation_id
             reservation.status          = ReservationStatus.assigned
             assigned_moto_ids.add(matched_moto.motorcycle_id)
-            db.flush()
+            await db.flush()
             results.append({
                 "reservation_id": reservation.reservation_id,
                 "client":         client_name,
@@ -448,8 +413,8 @@ def _print_reservation_assignment_results(results: list[dict]) -> None:
     print(f"\n{'=' * width}\n")
 
 
-def mark_complete(
-    db: Session,
+async def mark_complete(
+    db: AsyncSession,
     submission: Submission,
     event: Event,
     entity_type: str,
@@ -460,34 +425,34 @@ def mark_complete(
     and calls db.commit().
     """
     submission.status        = SubmissionStatus.complete
-    submission.submitted_at  = datetime.now(timezone.utc)
+    submission.submitted_at  = datetime.now(timezone.utc).replace(tzinfo=None)
     event.status             = EventStatus.complete
-    event.completed_at       = datetime.now(timezone.utc)
+    event.completed_at       = datetime.now(timezone.utc).replace(tzinfo=None)
     event.linked_entity_type = entity_type
-    db.flush()
+    await db.flush()
     event.linked_entity_id   = entity_id
-    db.commit()
+    await db.commit()
 
 
 # ======================================================================== #
 # Router-level utilities                                                    #
 # ======================================================================== #
 
-def create_event(db: Session, event_type: str, user_id: int) -> Event:
+async def create_event(db: AsyncSession, event_type: str, user_id: int) -> Event:
     """Creates and flushes a new Event row with status in_progress."""
     event = Event(
         event_type   = event_type,
         initiated_by = user_id,
         status       = EventStatus.in_progress,
-        started_at   = datetime.now(timezone.utc),
+        started_at   = datetime.now(timezone.utc).replace(tzinfo=None),
     )
     db.add(event)
-    db.flush()
+    await db.flush()
     return event
 
 
-def create_submissions_for_event(
-    db: Session,
+async def create_submissions_for_event(
+    db: AsyncSession,
     event_id: int,
     event_type_name: str,
 ) -> list:
@@ -508,23 +473,24 @@ def create_submissions_for_event(
         )
         db.add(sub)
         submissions.append(sub)
-    db.flush()
+    await db.flush()
     return submissions
 
 
 def save_upload_to_disk(
     submission_id: int,
-    file,
+    file_bytes: bytes,
     storage_root: str,
     original_filename: str,
 ) -> str:
     """
-    Saves an uploaded file to disk under storage_root/sub_<id><ext>.
+    Saves uploaded file bytes to disk under storage_root/sub_<id><ext>.
     Creates the directory if needed. Returns the full path.
+    Callers must pass already-read bytes (use await file.read() first).
     """
     os.makedirs(storage_root, exist_ok=True)
     ext      = os.path.splitext(original_filename)[-1].lower() or ".jpg"
     raw_path = os.path.join(storage_root, f"sub_{submission_id}{ext}")
     with open(raw_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+        f.write(file_bytes)
     return raw_path

@@ -1,7 +1,8 @@
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from database import get_db
 from models.submission import Submission
@@ -19,7 +20,7 @@ STORAGE_ROOT = os.path.join(
 async def upload_document(
     submission_id: int,
     file: UploadFile = File(...),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Receive a file upload for a specific submission slot.
@@ -27,27 +28,32 @@ async def upload_document(
     Saves the file to storage/submissions/raw/ and triggers the pipeline.
     Returns pipeline result with success flag and message.
     """
-    submission = db.query(Submission).filter(
-        Submission.submission_id == submission_id
-    ).first()
+    result = await db.execute(
+        select(Submission).where(Submission.submission_id == submission_id)
+    )
+    submission = result.scalar_one_or_none()
 
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
 
-    # Save raw file to disk
+    # Read file bytes and save to disk
+    file_bytes = await file.read()
     submission.raw_file_path = save_upload_to_disk(
-        submission_id, file, STORAGE_ROOT, file.filename or ""
+        submission_id, file_bytes, STORAGE_ROOT, file.filename or ""
     )
-    db.commit()
+    await db.commit()
 
     # Run pipeline
-    success, message = process_upload(db, submission_id)
+    success, message = await process_upload(db, submission_id)
+
+    result = await db.execute(
+        select(Submission).where(Submission.submission_id == submission_id)
+    )
+    updated_submission = result.scalar_one_or_none()
 
     return {
         "success":       success,
         "message":       message,
         "submission_id": submission_id,
-        "status":        db.query(Submission).filter(
-                             Submission.submission_id == submission_id
-                         ).first().status.value,
+        "status":        updated_submission.status.value if updated_submission and updated_submission.status else None,
     }

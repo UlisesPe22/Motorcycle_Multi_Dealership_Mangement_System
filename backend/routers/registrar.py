@@ -2,7 +2,8 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from database import get_db
 from models.user import User, UserRole
@@ -29,13 +30,12 @@ class VendedorCreate(BaseModel):
 # ======================================================================== #
 
 @router.get("/dealerships")
-def get_dealerships(db: Session = Depends(get_db)):
+async def get_dealerships(db: AsyncSession = Depends(get_db)):
     """Returns all dealerships ordered by name for the dealership dropdown."""
-    dealerships = (
-        db.query(Dealership)
-        .order_by(Dealership.name.asc())
-        .all()
+    result = await db.execute(
+        select(Dealership).order_by(Dealership.name.asc())
     )
+    dealerships = result.scalars().all()
     return [
         {"dealership_id": d.dealership_id, "name": d.name}
         for d in dealerships
@@ -43,7 +43,7 @@ def get_dealerships(db: Session = Depends(get_db)):
 
 
 @router.post("/vendedor")
-def create_vendedor(body: VendedorCreate, db: Session = Depends(get_db)):
+async def create_vendedor(body: VendedorCreate, db: AsyncSession = Depends(get_db)):
     """Registers a new employee user and records the event."""
     try:
         # 1. Validate name
@@ -55,14 +55,15 @@ def create_vendedor(body: VendedorCreate, db: Session = Depends(get_db)):
             return {"success": False, "message": "El teléfono es requerido."}
 
         # 3. Validate dealership exists
-        dealership = db.query(Dealership).filter(
-            Dealership.dealership_id == body.dealership_id
-        ).first()
+        result = await db.execute(
+            select(Dealership).where(Dealership.dealership_id == body.dealership_id)
+        )
+        dealership = result.scalar_one_or_none()
         if not dealership:
             return {"success": False, "message": "Sucursal no encontrada."}
 
         # 4. Create Event row
-        event = create_event(db, EventName.registrar_vendedor.value, HARDCODED_USER_ID)
+        event = await create_event(db, EventName.registrar_vendedor.value, HARDCODED_USER_ID)
 
         # 5. Create User row
         user = User(
@@ -74,19 +75,18 @@ def create_vendedor(body: VendedorCreate, db: Session = Depends(get_db)):
             created_at    = datetime.now(timezone.utc),
         )
         db.add(user)
-        db.flush()
+        await db.flush()
 
         # 6. Mark event complete and link entity
         event.status             = EventStatus.complete
         event.completed_at       = datetime.now(timezone.utc)
         event.linked_entity_type = "USER"
         event.linked_entity_id   = user.user_id
-        db.flush()
+        await db.flush()
 
         # 7. Commit
-        db.commit()
+        await db.commit()
 
-        # 8. Return success
         return {
             "success": True,
             "message": f"Vendedor {user.name} registrado correctamente.",
@@ -94,5 +94,5 @@ def create_vendedor(body: VendedorCreate, db: Session = Depends(get_db)):
         }
 
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         return {"success": False, "message": str(e)}

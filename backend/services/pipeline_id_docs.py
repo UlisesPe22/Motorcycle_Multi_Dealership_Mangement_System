@@ -1,17 +1,11 @@
 """
-pipeline.py — Main document processing pipeline orchestrator.
+pipeline_id_docs.py — Client registration pipeline (INE document processing).
 
-This service is the brain of the system. It is called when an image
-is uploaded to a submission and drives the full pipeline:
-
-  Phase 1: Identification   — Gemini validates the document and returns corners
-  Warp:    Image normalise  — OpenCV perspective warp to 1012x638
-  Phase 2: Extraction       — Gemini extracts all text fields
-  Cross-validation          — Pure Python checks MRZ vs front data
-  Client creation           — Writes the final Client record to DB
-
-All Gemini calls are logged to ai_analysis_log.
-All status transitions are written to submissions and events.
+Phase 1: Identification — Gemini validates document and returns corners
+Warp:    Image normalise — OpenCV perspective warp to 1012x638
+Phase 2: Extraction — Gemini extracts all text fields
+Cross-validation — Pure Python checks MRZ vs front data
+Client creation — Writes the final Client record to DB
 """
 import os
 import re
@@ -19,7 +13,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from pydantic import ValidationError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from dotenv import load_dotenv
 from config import CONFIDENCE_THRESHOLD, STORAGE_ROOT
@@ -167,11 +162,6 @@ Return exactly:
 # ======================================================================== #
 
 def _validate_mrz_check_digit(mrz_line: str, start: int, length: int, check_pos: int) -> bool:
-    """
-    Validate a single MRZ check digit using ICAO Doc 9303 algorithm.
-    Weights cycle 7, 3, 1.
-    char values: digits = face value, A-Z = 10-35, < = 0
-    """
     char_values = {str(i): i for i in range(10)}
     char_values.update({chr(c): c - 55 for c in range(65, 91)})
     char_values["<"] = 0
@@ -187,19 +177,7 @@ def _validate_mrz_check_digit(mrz_line: str, start: int, length: int, check_pos:
     return (total % 10) == int(check) if check.isdigit() else False
 
 
-
 def _parse_mrz(mrz_line_2: str) -> dict:
-    """
-    Parse only MRZ line 2 (TD-1 format, 30 chars, 0-indexed):
-      0-5   DOB       YYMMDD
-      6     DOB check digit
-      7     Sex       M / F
-      8-13  Expiry    YYMMDD
-      14    Expiry check digit
-      15-17 Nationality
-
-    Returns dict with mrz_dob, mrz_dob_yy, mrz_dob_mm, mrz_dob_dd, mrz_sex.
-    """
     result = {}
     l2 = mrz_line_2.strip().upper().replace(" ", "<")
 
@@ -220,21 +198,7 @@ def _parse_mrz(mrz_line_2: str) -> dict:
 
 
 def _cross_validate(front_fields: dict, back_fields: dict) -> tuple[bool, str]:
-    """
-    Cross-validate MRZ data (back) against extracted front fields.
-
-    Step 1 — All 3 MRZ lines must exist and be exactly 30 characters.
-    Step 2 — DOB check digit on line 2 position 6 must be valid (ICAO 7-3-1).
-    Step 3 — DOB line 2 positions 0-5 must match fecha_nacimiento from front.
-    Step 4 — Sex line 2 position 7 must match CURP position 10
-              (CURP H=hombre→MRZ M, CURP M=mujer→MRZ F).
-    """
-
-    # ------------------------------------------------------------------ #
-    # Step 1 — All 3 lines must exist and be exactly 30 characters        #
-    # ------------------------------------------------------------------ #
     mrz_line_2 = (back_fields.get("mrz_line_2") or {}).get("value") or ""
-
 
     if not mrz_line_2:
         return False, (
@@ -247,10 +211,7 @@ def _cross_validate(front_fields: dict, back_fields: dict) -> tuple[bool, str]:
             f"La línea 2 del MRZ tiene {len(l2)} caracteres en lugar de 30. "
             "El documento puede estar dañado o ser inválido."
         )
-    # ------------------------------------------------------------------ #
-    # Step 2 — DOB check digit (ICAO Doc 9303)                           #
-    # Line 2 positions 0-5 = DOB, position 6 = check digit              #
-    # ------------------------------------------------------------------ #
+
     if not _validate_mrz_check_digit(l2, 0, 6, 6):
         return False, (
             "El dígito verificador de la fecha de nacimiento en el MRZ es inválido. "
@@ -261,9 +222,6 @@ def _cross_validate(front_fields: dict, back_fields: dict) -> tuple[bool, str]:
     fecha_nac = (front_fields.get("fecha_nacimiento") or {}).get("value") or ""
     curp      = (front_fields.get("curp") or {}).get("value") or ""
 
-    # ------------------------------------------------------------------ #
-    # Step 3 — DOB cross-check                                            #
-    # ------------------------------------------------------------------ #
     mrz_dob = parsed.get("mrz_dob", "")
     if mrz_dob and fecha_nac:
         yy        = int(parsed.get("mrz_dob_yy", "0"))
@@ -286,66 +244,57 @@ def _cross_validate(front_fields: dict, back_fields: dict) -> tuple[bool, str]:
 
     return True, "Validación cruzada exitosa."
 
+
 # ======================================================================== #
 # Main pipeline entry point                                                 #
 # ======================================================================== #
 
-def run_phase1(db: Session, submission: Submission, event: Event) -> tuple[bool, str]:
+async def run_phase1(db: AsyncSession, submission: Submission, event: Event) -> tuple[bool, str]:
     """
     Phase 1 — Identification.
     Validates the document, detects version and corners.
-    Saves normalised image to disk.
-    Updates submission status.
-
-    Returns (success: bool, message: str)
+    Saves normalised image to disk. Updates submission status.
     """
     model = get_model()
 
     raw_path = submission.raw_file_path
     if not raw_path or not os.path.exists(raw_path):
-        return reject_and_return(db, submission, event, "Archivo de imagen no encontrado.")
+        return await reject_and_return(db, submission, event, "Archivo de imagen no encontrado.")
 
-    # Load and encode image
-    pil_img    = load_image_as_pil(raw_path)
-    img_bytes  = pil_to_jpeg_bytes(pil_img)
-    prompt     = _phase1_prompt(submission.slot_name.value)
+    pil_img   = load_image_as_pil(raw_path)
+    img_bytes = pil_to_jpeg_bytes(pil_img)
+    prompt    = _phase1_prompt(submission.slot_name.value if hasattr(submission.slot_name, 'value') else submission.slot_name)
 
-    # Call Gemini
     try:
-        raw_response, parsed_dict = call_gemini_image(model, prompt, img_bytes)
+        raw_response, parsed_dict = await call_gemini_image(model, prompt, img_bytes)
     except ValueError as e:
         reason = f"Error al procesar la respuesta de IA: {e}"
-        log_ai(db, submission.submission_id, "identification", str(e), None, None, False)
-        return reject_and_return(db, submission, event, reason)
+        await log_ai(db, submission.submission_id, "identification", str(e), None, None, False)
+        return await reject_and_return(db, submission, event, reason)
 
-    # Validate response structure
     try:
         phase1 = Phase1Response(**parsed_dict)
     except ValidationError as e:
         reason = f"Respuesta de IA con formato inválido: {e}"
-        log_ai(db, submission.submission_id, "identification", raw_response, parsed_dict, None, False)
-        return reject_and_return(db, submission, event, reason)
+        await log_ai(db, submission.submission_id, "identification", raw_response, parsed_dict, None, False)
+        return await reject_and_return(db, submission, event, reason)
 
-    # Log regardless of outcome
-    log_ai(
+    await log_ai(
         db, submission.submission_id, "identification",
         raw_response, parsed_dict,
         phase1.confidence, phase1.is_match and phase1.confidence >= CONFIDENCE_THRESHOLD
     )
 
-    # Check is_match
     if not phase1.is_match:
-        return reject_and_return(db, submission, event, phase1.user_message)
+        return await reject_and_return(db, submission, event, phase1.user_message)
 
-    # Check confidence
     if phase1.confidence < CONFIDENCE_THRESHOLD:
         reason = (
             f"Confianza insuficiente ({phase1.confidence:.0%}). "
             f"{phase1.user_message}"
         )
-        return reject_and_return(db, submission, event, reason)
+        return await reject_and_return(db, submission, event, reason)
 
-    # Warp and save normalised image
     normalised_path = os.path.join(
         STORAGE_ROOT, "submissions", "normalised",
         f"norm_{submission.submission_id}.jpg"
@@ -354,33 +303,35 @@ def run_phase1(db: Session, submission: Submission, event: Event) -> tuple[bool,
         warp_and_save(raw_path, phase1.corners.model_dump(), normalised_path)
     except Exception as e:
         reason = f"Error al normalizar la imagen: {e}"
-        return reject_and_return(db, submission, event, reason)
+        return await reject_and_return(db, submission, event, reason)
 
-    # Update submission
     submission.normalised_image_path  = normalised_path
     submission.gemini_detected_side   = phase1.detected_side
-    submission.submitted_at           = datetime.now(timezone.utc)
-    db.flush()
+    submission.submitted_at           = datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.flush()
 
     return True, phase1.user_message
 
 
-def run_phase2(db: Session, event: Event) -> tuple[bool, str]:
+async def run_phase2(db: AsyncSession, event: Event) -> tuple[bool, str]:
     """
     Phase 2 — Data extraction + cross-validation + client creation.
-    Runs only when ALL submissions in the event are status=matched
-    AND all have the same detected_version.
-
-    Returns (success: bool, message: str)
     """
-    submissions = db.query(Submission).filter(
-        Submission.event_id == event.event_id
-    ).all()
+    result = await db.execute(
+        select(Submission).where(Submission.event_id == event.event_id)
+    )
+    submissions = result.scalars().all()
 
-    model   = get_model()
+    model = get_model()
 
-    front_sub = next(s for s in submissions if s.slot_name.value == "id_front")
-    back_sub  = next(s for s in submissions if s.slot_name.value == "id_back")
+    front_sub = next(
+        s for s in submissions
+        if (s.slot_name.value if hasattr(s.slot_name, 'value') else s.slot_name) == "id_front"
+    )
+    back_sub = next(
+        s for s in submissions
+        if (s.slot_name.value if hasattr(s.slot_name, 'value') else s.slot_name) == "id_back"
+    )
 
     # ------------------------------------------------------------------ #
     # Extract front                                                        #
@@ -388,30 +339,32 @@ def run_phase2(db: Session, event: Event) -> tuple[bool, str]:
     front_pil   = load_image_as_pil(front_sub.raw_file_path)
     front_bytes = pil_to_jpeg_bytes(front_pil)
 
-    # Get corners from Phase 1 log
-    front_log = db.query(AIAnalysisLog).filter(
-        AIAnalysisLog.submission_id == front_sub.submission_id,
-        AIAnalysisLog.step_name     == "identification",
-        AIAnalysisLog.success       == True,
-    ).first()
+    result = await db.execute(
+        select(AIAnalysisLog).where(
+            AIAnalysisLog.submission_id == front_sub.submission_id,
+            AIAnalysisLog.step_name == "identification",
+            AIAnalysisLog.success == True,
+        )
+    )
+    front_log = result.scalar_one_or_none()
     front_corners = front_log.parsed_result["corners"] if front_log else None
 
     front_prompt = _phase2_front_prompt(front_corners)
 
     try:
-        front_raw, front_dict = call_gemini_image(model, front_prompt, front_bytes)
+        front_raw, front_dict = await call_gemini_image(model, front_prompt, front_bytes)
     except ValueError as e:
         reason = f"Error al extraer datos del frente: {e}"
-        return reject_and_return(db, front_sub, event, reason)
+        return await reject_and_return(db, front_sub, event, reason)
 
     try:
         front_result = Phase2FrontResponse(**front_dict)
     except ValidationError as e:
         reason = f"Respuesta de IA inválida en extracción del frente: {e}"
-        log_ai(db, front_sub.submission_id, "extraction", front_raw, front_dict, None, False)
-        return reject_and_return(db, front_sub, event, reason)
+        await log_ai(db, front_sub.submission_id, "extraction", front_raw, front_dict, None, False)
+        return await reject_and_return(db, front_sub, event, reason)
 
-    log_ai(
+    await log_ai(
         db, front_sub.submission_id, "extraction",
         front_raw, front_dict,
         front_result.overall_confidence,
@@ -424,7 +377,7 @@ def run_phase2(db: Session, event: Event) -> tuple[bool, str]:
             f"({front_result.overall_confidence:.0%}). "
             "Por favor, use una imagen más clara."
         )
-        return reject_and_return(db, front_sub, event, reason)
+        return await reject_and_return(db, front_sub, event, reason)
 
     # ------------------------------------------------------------------ #
     # Extract back                                                         #
@@ -432,29 +385,32 @@ def run_phase2(db: Session, event: Event) -> tuple[bool, str]:
     back_pil   = load_image_as_pil(back_sub.raw_file_path)
     back_bytes = pil_to_jpeg_bytes(back_pil)
 
-    back_log = db.query(AIAnalysisLog).filter(
-        AIAnalysisLog.submission_id == back_sub.submission_id,
-        AIAnalysisLog.step_name     == "identification",
-        AIAnalysisLog.success       == True,
-    ).first()
+    result = await db.execute(
+        select(AIAnalysisLog).where(
+            AIAnalysisLog.submission_id == back_sub.submission_id,
+            AIAnalysisLog.step_name == "identification",
+            AIAnalysisLog.success == True,
+        )
+    )
+    back_log = result.scalar_one_or_none()
     back_corners = back_log.parsed_result["corners"] if back_log else None
 
     back_prompt = _phase2_back_prompt(back_corners)
 
     try:
-        back_raw, back_dict = call_gemini_image(model, back_prompt, back_bytes)
+        back_raw, back_dict = await call_gemini_image(model, back_prompt, back_bytes)
     except ValueError as e:
         reason = f"Error al extraer datos del reverso: {e}"
-        return reject_and_return(db, back_sub, event, reason)
+        return await reject_and_return(db, back_sub, event, reason)
 
     try:
         back_result = Phase2BackResponse(**back_dict)
     except ValidationError as e:
         reason = f"Respuesta de IA inválida en extracción del reverso: {e}"
-        log_ai(db, back_sub.submission_id, "extraction", back_raw, back_dict, None, False)
-        return reject_and_return(db, back_sub, event, reason)
+        await log_ai(db, back_sub.submission_id, "extraction", back_raw, back_dict, None, False)
+        return await reject_and_return(db, back_sub, event, reason)
 
-    log_ai(
+    await log_ai(
         db, back_sub.submission_id, "extraction",
         back_raw, back_dict,
         back_result.overall_confidence,
@@ -467,7 +423,7 @@ def run_phase2(db: Session, event: Event) -> tuple[bool, str]:
             f"({back_result.overall_confidence:.0%}). "
             "Por favor, use una imagen más clara."
         )
-        return reject_and_return(db, back_sub, event, reason)
+        return await reject_and_return(db, back_sub, event, reason)
 
     # ------------------------------------------------------------------ #
     # Cross-validation                                                     #
@@ -478,33 +434,33 @@ def run_phase2(db: Session, event: Event) -> tuple[bool, str]:
     passed, cv_message = _cross_validate(front_fields, back_fields)
     if not passed:
         for s in submissions:
-            reject_submission(db, s, cv_message)
-        reject_event(db, event, cv_message)
+            await reject_submission(db, s, cv_message)
+        await reject_event(db, event, cv_message)
         return False, cv_message
 
     # ------------------------------------------------------------------ #
     # Create client record                                                 #
     # ------------------------------------------------------------------ #
-   
-    
     def field_val(fields: dict, key: str) -> Optional[str]:
         f = fields.get(key)
         return f["value"] if f and f.get("value") else None
+
     existing_curp = field_val(front_fields, "curp")
-    existing = db.query(Client).filter(
-        Client.curp == existing_curp
-    ).first()
+    result = await db.execute(
+        select(Client).where(Client.curp == existing_curp)
+    )
+    existing = result.scalar_one_or_none()
 
     if existing:
         for s in submissions:
-            reject_submission(db, s, f"Cliente ya registrado.")
-        reject_event(db, event, f"Cliente ya registrado.")
-        db.commit()
+            await reject_submission(db, s, "Cliente ya registrado.")
+        await reject_event(db, event, "Cliente ya registrado.")
+        await db.commit()
         return False, (
             f"El cliente con CURP {existing_curp} "
             f"ya se encuentra registrado con ID {existing.client_id}."
         )
-    
+
     client = Client(
         nombre_completo   = field_val(front_fields, "nombre_completo"),
         curp              = field_val(front_fields, "curp"),
@@ -518,29 +474,29 @@ def run_phase2(db: Session, event: Event) -> tuple[bool, str]:
     )
     db.add(client)
 
-    # Mark submissions and event complete
     front_sub.status = SubmissionStatus.complete
     back_sub.status  = SubmissionStatus.complete
     event.status     = EventStatus.complete
-    event.completed_at = datetime.now(timezone.utc)
+    event.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
     event.linked_entity_type = "CLIENT"
 
-    db.flush()
+    await db.flush()
     event.linked_entity_id = client.client_id
-    db.commit()
+    await db.commit()
 
     return True, f"Cliente registrado exitosamente. ID: {client.client_id}"
 
-def handle_client_registration(
-    db: Session,
+
+async def handle_client_registration(
+    db: AsyncSession,
     submission: Submission,
     event: Event,
 ) -> tuple[bool, str]:
 
-    p1_success, p1_message = run_phase1(db, submission, event)
+    p1_success, p1_message = await run_phase1(db, submission, event)
     if not p1_success:
-        reject_event(db, event, p1_message)
-        db.commit()
+        await reject_event(db, event, p1_message)
+        await db.commit()
         return False, p1_message
 
     return True, p1_message

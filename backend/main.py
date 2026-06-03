@@ -7,6 +7,8 @@ Run from backend/ folder:
 API docs available at:
     http://localhost:8000/docs
 """
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -33,13 +35,19 @@ from models.contract                    import Contract                         
 
 from routers import events, submissions, clients, delivery_confirmations, motorcycles, reservations, sales, registrar
 
-# Create tables if they don't exist yet
-Base.metadata.create_all(bind=engine)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+
 
 app = FastAPI(
     title="Moto Dealer — Document Processing API",
     description="AI-powered document validation and client registration pipeline.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # Allow Streamlit (running on port 8501) to call this API
@@ -61,10 +69,10 @@ app.include_router(registrar.router)
 
 
 @app.get("/")
-def root():
+async def root():
     return {"status": "ok", "message": "Moto Dealer API running"}
 
 
 @app.get("/health")
-def health():
+async def health():
     return {"status": "ok"}
