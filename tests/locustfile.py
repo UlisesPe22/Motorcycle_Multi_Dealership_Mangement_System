@@ -14,11 +14,9 @@ To confirm: GET /reservations/dealerships and GET /reservations/models.
 
 import os
 import random
-
-from locust import HttpUser, task, between
-
+from locust import HttpUser, task, between, constant
 BASE_URL = "http://localhost:8000"
-TEST_FILES_DIR = os.path.join(os.path.dirname(__file__), "test_files")
+TEST_FILES_DIR = os.path.join(os.path.dirname(__file__), "test_daa")
 
 # Populated by seed_load_test.py — queried from DB by name
 DEALERSHIP_VIA_MORELOS_ID = 1       # PLACEHOLDER — replace with actual ID after querying DB
@@ -176,35 +174,42 @@ class MixedTrafficUser(HttpUser):
 # Sequential Gemini pipeline calls — each user specialises in one pipeline. #
 # 3 users, weight=1.                                                         #
 # ======================================================================== #
-class GeminiPipelineUser(HttpUser):
+# class GeminiPipelineUser(HttpUser):
     weight = 1
-    wait_time = between(5, 15)
+    wait_time = constant(999999)  # fires @task only once effectively
 
-    _next_role = 0
+    _sequence_done = False
 
     def on_start(self):
-        roles = ["client_reg", "purchase_order", "order_confirmation", "delivery"]
-        self._role = roles[GeminiPipelineUser._next_role % len(roles)]
-        GeminiPipelineUser._next_role += 1
+        # Only the first spawned GeminiPipelineUser runs the full sequence
+        if GeminiPipelineUser._sequence_done:
+            return
+        GeminiPipelineUser._sequence_done = True
+
+        # Step 1 — Client registration
+        self._register_client()
+
+        # Step 2 — Purchase order (must come before order confirmation)
+        self._upload_purchase_order()
+
+        # Step 3 — Order confirmation (orden de traslado, depends on purchase order)
+        self._upload_order_confirmation()
+
+        # Step 4 — Delivery confirmation (depends on order confirmation)
+        self._upload_delivery()
 
     @task
-    def run_pipeline(self):
-        if self._role == "client_reg":
-            self._register_client()
-        elif self._role == "purchase_order":
-            self._upload_purchase_order()
-        elif self._role == "order_confirmation":
-            self._upload_order_confirmation()
-        else:
-            self._upload_delivery()
+    def idle(self):
+        pass  # never really fires due to wait_time = constant(999999)
 
     def _register_client(self):
         ine_front = os.path.join(TEST_FILES_DIR, "sub1.jpeg")
         ine_back  = os.path.join(TEST_FILES_DIR, "sub2.jpeg")
         if not os.path.exists(ine_front) or not os.path.exists(ine_back):
+            print("[GeminiPipelineUser] INE files not found — skipping client registration")
             return
         with open(ine_front, "rb") as f_front, open(ine_back, "rb") as f_back:
-            self.client.post(
+            resp = self.client.post(
                 "/clients/register",
                 files={
                     "front_file": ("ine_front.jpg", f_front, "image/jpeg"),
@@ -216,16 +221,19 @@ class GeminiPipelineUser(HttpUser):
                 },
                 timeout=120,
             )
+        print(f"[GeminiPipelineUser] client_reg → {resp.status_code}")
 
     def _upload_purchase_order(self):
         pdf_path = os.path.join(TEST_FILES_DIR, "OrdenCompra_TLAL_11_motos.pdf")
         if not os.path.exists(pdf_path):
+            print("[GeminiPipelineUser] Purchase order PDF not found — skipping")
             return
         resp = self.client.post(
             "/events/",
             params={"event_type_name": "purchase_order"},
         )
         if resp.status_code != 200:
+            print(f"[GeminiPipelineUser] purchase_order event creation failed → {resp.status_code}")
             return
         submissions = resp.json().get("submissions", [])
         target = next(
@@ -233,24 +241,28 @@ class GeminiPipelineUser(HttpUser):
             submissions[0] if submissions else None,
         )
         if not target:
+            print("[GeminiPipelineUser] No submission found for purchase_order_table")
             return
         submission_id = target["submission_id"]
         with open(pdf_path, "rb") as f:
-            self.client.post(
+            resp = self.client.post(
                 f"/submissions/{submission_id}/upload",
                 files={"file": ("orden_compra.pdf", f, "application/pdf")},
                 timeout=120,
             )
+        print(f"[GeminiPipelineUser] purchase_order upload → {resp.status_code}")
 
     def _upload_order_confirmation(self):
         pdf_path = os.path.join(TEST_FILES_DIR, "OrdenTraslado1_TLAL_11_motos.pdf")
         if not os.path.exists(pdf_path):
+            print("[GeminiPipelineUser] Order confirmation PDF not found — skipping")
             return
         resp = self.client.post(
             "/events/",
             params={"event_type_name": "order_confirmation"},
         )
         if resp.status_code != 200:
+            print(f"[GeminiPipelineUser] order_confirmation event creation failed → {resp.status_code}")
             return
         submissions = resp.json().get("submissions", [])
         target = next(
@@ -258,21 +270,24 @@ class GeminiPipelineUser(HttpUser):
             submissions[0] if submissions else None,
         )
         if not target:
+            print("[GeminiPipelineUser] No submission found for order_table")
             return
         submission_id = target["submission_id"]
         with open(pdf_path, "rb") as f:
-            self.client.post(
+            resp = self.client.post(
                 f"/submissions/{submission_id}/upload",
                 files={"file": ("orden_confirmacion.pdf", f, "application/pdf")},
                 timeout=120,
             )
+        print(f"[GeminiPipelineUser] order_confirmation upload → {resp.status_code}")
 
     def _upload_delivery(self):
         pdf_path = os.path.join(TEST_FILES_DIR, "Entrega_TLAL_10_motos.pdf")
         if not os.path.exists(pdf_path):
+            print("[GeminiPipelineUser] Delivery PDF not found — skipping")
             return
         with open(pdf_path, "rb") as f:
-            self.client.post(
+            resp = self.client.post(
                 "/delivery-confirmations/upload",
                 files={"file": ("entrega.pdf", f, "application/pdf")},
                 data={
@@ -281,3 +296,4 @@ class GeminiPipelineUser(HttpUser):
                 },
                 timeout=120,
             )
+        print(f"[GeminiPipelineUser] delivery upload → {resp.status_code}")
