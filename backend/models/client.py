@@ -67,6 +67,7 @@ class Client(Base):
     event            = relationship("Event")
     registered_by_user = relationship("User", foreign_keys=[registered_by])
     reservations     = relationship("Reservation", back_populates="client")
+    sales            = relationship("Sale", back_populates="client")
 
     def __repr__(self):
         return f"<Client id={self.client_id} nombre={self.nombre_completo} curp={self.curp}>"

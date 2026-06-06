@@ -6,8 +6,7 @@ import ClientList from './pages/ClientList'
 import PurchaseOrder from './pages/PurchaseOrder'
 import OrderConfirmation from './pages/OrderConfirmation'
 import Delivery from './pages/Delivery'
-import Reservation from './pages/Reservation'
-import Sale from './pages/Sale'
+import DeclarePayment from './pages/DeclarePayment'
 import Placeholders from './pages/Placeholders'
 import RegisterVendedor from './pages/RegisterVendedor'
 
@@ -25,8 +24,7 @@ function AppContent() {
           <Route path="/orden-compra" element={<PurchaseOrder />} />
           <Route path="/orden-traslado" element={<OrderConfirmation />} />
           <Route path="/registrar-entrega" element={<Delivery />} />
-          <Route path="/reservacion" element={<Reservation />} />
-          <Route path="/iniciar-venta" element={<Sale />} />
+          <Route path="/declarar-pago" element={<DeclarePayment />} />
           <Route path="/validar-venta" element={<Placeholders title="Validar Venta" />} />
           <Route path="/registrar-empleado" element={<RegisterVendedor />} />
         </Routes>

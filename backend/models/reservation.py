@@ -22,9 +22,9 @@ class Reservation(Base):
     status          = Column(Enum(ReservationStatus),
                              default=ReservationStatus.active,                       nullable=False)
     created_by      = Column(Integer, ForeignKey("users.user_id"),                  nullable=False)
-    event_id        = Column(Integer, ForeignKey("events.event_id"),                nullable=False)
+    event_id        = Column(Integer, ForeignKey("events.event_id"),                nullable=True)
     created_at      = Column(DateTime,
-                             default=lambda: datetime.now(timezone.utc),            nullable=False)
+                             default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), nullable=False)
 
     client     = relationship("Client",            back_populates="reservations")
     model      = relationship("MotorcycleCatalog", back_populates="reservations")

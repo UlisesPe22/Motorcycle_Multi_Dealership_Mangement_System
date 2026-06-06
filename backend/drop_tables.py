@@ -28,13 +28,11 @@ from models.payment_event               import PaymentEvent                     
 from models.payment_item                import PaymentItem                            # noqa: F401
 import asyncio
 
-async def create_all_tables():
-    print("Creating tables...")
+async def drop_all_tables():
+    print("Dropping all tables...")
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    print("Done. Tables created:")
-    for table_name in Base.metadata.tables.keys():
-        print(f"  ✓ {table_name}")
+        await conn.run_sync(Base.metadata.drop_all)
+    print("Done. All tables dropped.")
 
 if __name__ == "__main__":
-    asyncio.run(create_all_tables())
+    asyncio.run(drop_all_tables())

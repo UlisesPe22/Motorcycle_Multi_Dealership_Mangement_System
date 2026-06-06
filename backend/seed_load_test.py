@@ -19,7 +19,7 @@ import os
 import asyncio
 import random
 import string
-from datetime import datetime
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -35,7 +35,6 @@ from models.motorcycle_catalog import MotorcycleCatalog
 from models.reservation import Reservation, ReservationStatus
 from models.reservation_color import ReservationColor
 from models.submission import Submission, SubmissionStatus
-from services.pipeline_utils import create_event
 
 # ======================================================================== #
 # Constants                                                                  #
@@ -192,7 +191,7 @@ async def seed_clients(db) -> tuple:
             event_type   = EventName.client_registration.value,
             initiated_by = 2,
             status       = EventStatus.complete,
-            started_at   = datetime.utcnow(),
+            started_at   = datetime.now(timezone.utc).replace(tzinfo=None),
         )
         db.add(event)
         await db.flush()
@@ -383,8 +382,6 @@ async def seed_reservations(
             color_name     = random.choice(VALID_COLORS[canonical_name])
             color_id       = color_name_to_id[color_name]
 
-            event = await create_event(db, EventName.motorcycle_reservation.value, 2)
-
             reservation = Reservation(
                 client_id      = random.choice(client_ids),
                 model_id       = moto_info["model_id"],
@@ -392,8 +389,8 @@ async def seed_reservations(
                 deposit_amount = round(random.uniform(2000.0, 8000.0), 2),
                 status         = ReservationStatus.active,
                 created_by     = 2,
-                event_id       = event.event_id,
-                created_at     = datetime.utcnow(),
+                event_id       = None,
+                created_at     = datetime.now(timezone.utc).replace(tzinfo=None),
             )
             db.add(reservation)
             await db.flush()

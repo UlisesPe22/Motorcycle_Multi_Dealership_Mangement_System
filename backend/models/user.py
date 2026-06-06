@@ -21,7 +21,9 @@ class User(Base):
     created_by    = Column(Integer, ForeignKey("users.user_id"), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
-    dealership = relationship("Dealership")
+    dealership     = relationship("Dealership")
+    sales          = relationship("Sale",         back_populates="vendor",  foreign_keys="Sale.vendor_id")
+    payment_events = relationship("PaymentEvent", back_populates="creator", foreign_keys="PaymentEvent.created_by")
 
     def __repr__(self):
         return f"<User id={self.user_id} name={self.name} role={self.role}>"

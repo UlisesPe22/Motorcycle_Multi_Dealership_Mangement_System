@@ -14,4 +14,9 @@ from models.reservation                 import Reservation, ReservationStatus   
 from models.reservation_color           import ReservationColor                              # noqa: F401
 from models.motorcycle                  import Motorcycle, MotorcycleStatus                  # noqa: F401
 from models.credit_institution          import CreditInstitution                              # noqa: F401
-from models.contract                    import Contract, SaleType, PaymentMethod              # noqa: F401
+from models.contract                    import Contract, SaleType, ContractPaymentMethod       # noqa: F401
+
+from models.payment_method import PaymentMethod                                     # noqa: F401
+from models.sale            import Sale                                                 # noqa: F401
+from models.payment_event   import PaymentEvent                                         # noqa: F401
+from models.payment_item    import PaymentItem                                          # noqa: F401

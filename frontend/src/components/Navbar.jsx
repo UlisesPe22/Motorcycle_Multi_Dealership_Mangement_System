@@ -7,8 +7,7 @@ const NAV_MAIN = [
   { path: '/orden-compra',        icon: '≡', label: 'Orden de Compra' },
   { path: '/orden-traslado',      icon: '▷', label: 'Orden de Traslado' },
   { path: '/registrar-entrega',   icon: '✔', label: 'Registrar Entrega' },
-  { path: '/reservacion',         icon: '◈', label: 'Registrar Reservación' },
-  { path: '/iniciar-venta',       icon: '◇', label: 'Iniciar Venta' },
+  { path: '/declarar-pago',       icon: '◇', label: 'Declarar Pago' },
   { path: '/registrar-empleado',  icon: '◈', label: 'Registrar Empleado' },
 ]
 

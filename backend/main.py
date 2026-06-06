@@ -32,8 +32,13 @@ from models.reservation_color           import ReservationColor                 
 from models.motorcycle                  import Motorcycle                            # noqa
 from models.credit_institution          import CreditInstitution                      # noqa
 from models.contract                    import Contract                               # noqa
+from models.payment_method              import PaymentMethod                          # noqa
+from models.sale                        import Sale                                   # noqa
+from models.payment_event               import PaymentEvent                           # noqa
+from models.payment_item                import PaymentItem                            # noqa
 
 from routers import events, submissions, clients, delivery_confirmations, motorcycles, reservations, sales, registrar
+from routers.declare_payment import router as declare_payment_router
 
 
 @asynccontextmanager
@@ -66,6 +71,7 @@ app.include_router(motorcycles.router)
 app.include_router(reservations.router)
 app.include_router(sales.router)
 app.include_router(registrar.router)
+app.include_router(declare_payment_router)
 
 
 @app.get("/")

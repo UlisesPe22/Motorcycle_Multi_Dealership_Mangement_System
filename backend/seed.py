@@ -14,6 +14,10 @@ from models.motorcycle_model_code    import MotorcycleModelCode
 from models.motorcycle_catalog_color import MotorcycleCatalogColor
 from models.credit_institution       import CreditInstitution
 from models.color                    import Color
+from models.payment_method           import PaymentMethod
+from models.sale                     import Sale          # noqa: F401 — registers mapper
+from models.payment_event            import PaymentEvent  # noqa: F401 — registers mapper
+from models.payment_item             import PaymentItem   # noqa: F401 — registers mapper
 
 
 async def seed_users(db):
@@ -238,12 +242,34 @@ async def seed_credit_institutions(db):
     print("  ✓ Inserted 2 credit institutions.")
 
 
+async def seed_payment_methods(db):
+    methods = [
+        "Efectivo",
+        "Terminal Banamex",
+        "Terminal Mifel",
+        "Terminal Banorte",
+        "Transferencia",
+        "Financiera",
+    ]
+    inserted = 0
+    for name in methods:
+        existing = (await db.execute(
+            select(PaymentMethod).where(PaymentMethod.name == name)
+        )).scalars().first()
+        if not existing:
+            db.add(PaymentMethod(name=name))
+            inserted += 1
+    await db.commit()
+    print(f"  [OK] Inserted {inserted} payment methods.")
+
+
 async def seed():
     async with AsyncSessionLocal() as db:
         print("\nSeeding database...")
         await seed_users(db)
         await seed_dealerships(db)
         await seed_credit_institutions(db)
+        await seed_payment_methods(db)
         await seed_colors(db)
         await seed_motorcycle_catalog(db)
         await seed_motorcycle_model_codes(db)

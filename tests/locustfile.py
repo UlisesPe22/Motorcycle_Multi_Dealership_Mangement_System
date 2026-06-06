@@ -182,9 +182,6 @@ class MixedTrafficUser(HttpUser):
 
     def on_start(self):
         # Only the first spawned GeminiPipelineUser runs the full sequence
-        if GeminiPipelineUser._sequence_done:
-            return
-        GeminiPipelineUser._sequence_done = True
 
         # Step 1 — Client registration
         self._register_client()

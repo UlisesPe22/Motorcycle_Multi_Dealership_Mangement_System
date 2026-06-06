@@ -10,7 +10,7 @@ class SaleType(str, enum.Enum):
     credito = "credito"
 
 
-class PaymentMethod(str, enum.Enum):
+class ContractPaymentMethod(str, enum.Enum):
     transferencia = "transferencia"
     efectivo      = "efectivo"
 
@@ -32,7 +32,7 @@ class Contract(Base):
     employee_id            = Column(Integer, ForeignKey("users.user_id"),
                                     nullable=False)
     sale_type              = Column(Enum(SaleType), nullable=False)
-    payment_method         = Column(Enum(PaymentMethod), nullable=True)
+    payment_method         = Column(Enum(ContractPaymentMethod, name="paymentmethod"), nullable=True)
     payment_downpayment    = Column(Float, nullable=True)
     payment_institution_id = Column(Integer,
                                     ForeignKey("credit_institutions.credit_institution_id"),

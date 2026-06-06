@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String
+from sqlalchemy.orm import relationship
 from database import Base
 
 class Dealership(Base):
@@ -10,3 +11,5 @@ class Dealership(Base):
     name_contract   = Column(String, nullable=False)
     city_contract   = Column(String, nullable=False)
     contract_prefix = Column(String, nullable=False)
+
+    sales = relationship("Sale", back_populates="dealership")

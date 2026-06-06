@@ -75,3 +75,4 @@ class Motorcycle(Base):
     dealership  = relationship("Dealership")
     reservation = relationship("Reservation", back_populates="motorcycle",
                                foreign_keys=[reservation_id])
+    sale        = relationship("Sale", back_populates="motorcycle", uselist=False)

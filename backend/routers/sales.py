@@ -15,13 +15,13 @@ from models.motorcycle import Motorcycle, MotorcycleStatus
 from models.motorcycle_catalog import MotorcycleCatalog
 from models.client import Client
 from models.dealership import Dealership
-from models.contract import Contract, SaleType, PaymentMethod
+from models.contract import Contract, SaleType, ContractPaymentMethod
 from models.credit_institution import CreditInstitution
 from models.event import Event, EventName, EventStatus
 from models.reservation import Reservation, ReservationStatus
 from models.user import User
 from config import HARDCODED_USER_ID
-from services.pipeline_sale import (
+from services.pipeline_contract import (
     generate_contract_number,
     generate_documents,
     get_moto_price,
@@ -328,7 +328,7 @@ async def create_sale(body: SaleCreateBody, db: AsyncSession = Depends(get_db)):
             dealership_id          = dealership.dealership_id,
             employee_id            = HARDCODED_USER_ID,
             sale_type              = SaleType(body.sale_type),
-            payment_method         = PaymentMethod(body.payment_method),
+            payment_method         = ContractPaymentMethod(body.payment_method),
             payment_downpayment    = body.payment_downpayment,
             payment_institution_id = body.payment_institution_id,
             payment_bank           = body.payment_bank,
