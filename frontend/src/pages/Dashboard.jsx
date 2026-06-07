@@ -14,6 +14,9 @@ const STATUS_ES = {
   cancelled:         'Cancelada',
   incoming_reserved: 'En camino (Reservada)',
   in_stock_reserved: 'En stock (Reservada)',
+  reserved_for_sale: 'Congelada',
+  sale_in_progress:  'Venta Iniciada',
+  fully_paid:        'Pago Completo',
 }
 
 const STATUS_BADGE = {
@@ -26,6 +29,9 @@ const STATUS_BADGE = {
   cancelled:         { bg: '#F1F5F9', fg: '#94A3B8' },
   incoming_reserved: { bg: '#FEF3C7', fg: '#92400E' },
   in_stock_reserved: { bg: '#DCFCE7', fg: '#15803D' },
+  reserved_for_sale: { bg: '#E0F2FE', fg: '#0369A1' },
+  sale_in_progress:  { bg: '#FEF9C3', fg: '#854D0E' },
+  fully_paid:        { bg: '#DCFCE7', fg: '#15803D' },
 }
 
 const RESERVED_STATUSES = new Set(['incoming_reserved', 'in_stock_reserved'])
@@ -39,6 +45,7 @@ const ALL_MODELS = [
 const EST_OPTIONS = [
   'Todos', 'Comprada', 'En camino', 'En stock', 'No comprada',
   'Rechazada', 'Vendida', 'Cancelada', 'En camino (Reservada)', 'En stock (Reservada)',
+  'Congelada', 'Venta Iniciada', 'Pago Completo',
 ]
 
 function Badge({ status }) {

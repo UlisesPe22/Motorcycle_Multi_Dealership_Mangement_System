@@ -22,8 +22,6 @@ from services.pipeline_utils import (
     is_valid_serie,
     is_valid_motor,
     mark_complete,
-    _auto_assign_reservations,
-    _print_reservation_assignment_results,
 )
 
 
@@ -321,8 +319,6 @@ async def handle_order_confirmation(
     await db.flush()
 
     # 10. Match each motorcycle to purchased record or create as incoming
-    newly_incoming = []
-
     for resolved in resolved_models:
         existing = await _find_matching_purchased_motorcycle(
             db,
@@ -337,7 +333,6 @@ async def handle_order_confirmation(
             existing.color                 = resolved["color"]
             existing.order_confirmation_id = order_conf_doc.order_confirmation_document_id
             await db.flush()
-            newly_incoming.append(existing)
         else:
             new_moto = Motorcycle(
                 model_id               = resolved["model_id"],
@@ -350,16 +345,7 @@ async def handle_order_confirmation(
             )
             db.add(new_moto)
             await db.flush()
-            newly_incoming.append(new_moto)
 
-    # 11. Auto-assign reservations
-    if newly_incoming:
-        assignment_results = await _auto_assign_reservations(
-            db, dealership.dealership_id, newly_incoming
-        )
-        _print_reservation_assignment_results(assignment_results)
-
-    # 12. Mark submission and event complete
     await mark_complete(
         db, submission, event,
         "ORDER_CONFIRMATION", order_conf_doc.order_confirmation_document_id,

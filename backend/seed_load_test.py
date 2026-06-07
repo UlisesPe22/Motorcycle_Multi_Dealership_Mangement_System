@@ -1,19 +1,3 @@
-"""
-seed_load_test.py — Populates the DB with realistic load-test data.
-
-Prerequisite: seed.py has already been run (users, dealerships, colors,
-catalog, model codes, catalog colors, credit institutions must exist).
-
-Inserts:
-  - 200 clients  (each backed by a minimal event + 2 submissions for FK integrity)
-  - 200 motorcycles  (67 Via Morelos / 67 Ignacio Zaragoza / 66 Tlalpizahuac;
-                      first 20 of each main dealership are incoming, rest in_stock)
-  - 60 reservations  (30 Via Morelos / 30 Ignacio Zaragoza, pointing at
-                      incoming motorcycles with valid catalog colors)
-
-Each section is idempotent: skipped when the target count already exists.
-"""
-
 import sys
 import os
 import asyncio
@@ -23,33 +7,27 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sqlalchemy import select, func
+from sqlalchemy import select
 
 from database import AsyncSessionLocal
+from config import DISCOUNTS_ACTIVE
 from models.client import Client
 from models.color import Color
 from models.dealership import Dealership
 from models.event import Event, EventName, EventStatus, SlotName
 from models.motorcycle import Motorcycle, MotorcycleStatus
 from models.motorcycle_catalog import MotorcycleCatalog
+from models.payment_event import PaymentEvent
+from models.payment_item import PaymentItem
+from models.payment_method import PaymentMethod
 from models.reservation import Reservation, ReservationStatus
 from models.reservation_color import ReservationColor
+from models.sale import Sale
 from models.submission import Submission, SubmissionStatus
 
 # ======================================================================== #
 # Constants                                                                  #
 # ======================================================================== #
-
-first_names = [
-    "Juan", "Maria", "Carlos", "Ana", "Luis", "Rosa", "Pedro", "Carmen",
-    "Jorge", "Patricia", "Miguel", "Laura", "Roberto", "Sandra", "Francisco",
-    "Monica", "Antonio", "Veronica", "Manuel", "Alejandra",
-]
-last_names = [
-    "Garcia", "Martinez", "Lopez", "Hernandez", "Gonzalez", "Perez",
-    "Rodriguez", "Sanchez", "Ramirez", "Torres", "Flores", "Rivera",
-    "Gomez", "Diaz", "Cruz", "Morales", "Reyes", "Gutierrez", "Ortiz", "Chavez",
-]
 
 VALID_COLORS = {
     "Pulsar N125 FI-CBS":  ["Purpura", "Citrus",  "Rojo"],
@@ -64,40 +42,56 @@ VALID_COLORS = {
     "Pulsar NS400Z":       ["Gris",    "Rojo"],
 }
 
-_UPPER    = string.ascii_uppercase
-_DIGITS   = string.digits
-_ALPHANUM = _UPPER + _DIGITS
+CLIENTS_DATA = [
+    ("Carlos Mendoza Rivera",      "MERC850312AB1", "55123456789", "carlos.mendoza@gmail.com"),
+    ("Ana Sofia Gutierrez Lopez",  "GULA920815CD2", "55234567890", "ana.gutierrez@gmail.com"),
+    ("Jose Luis Ramirez Torres",   "RATJ880601EF3", "55345678901", "jose.ramirez@gmail.com"),
+    ("Maria Elena Flores Castro",  "FLCM910420GH4", "55456789012", "maria.flores@gmail.com"),
+    ("Roberto Sanchez Morales",    "SAMR870930IJ5", "55567890123", "roberto.sanchez@gmail.com"),
+    ("Laura Patricia Diaz Reyes",  "DIRL940715KL6", "55678901234", "laura.diaz@gmail.com"),
+    ("Miguel Angel Herrera Vega",  "HEVM960203MN7", "55789012345", "miguel.herrera@gmail.com"),
+    ("Gabriela Torres Mendez",     "TOMG830518OP8", "55890123456", "gabriela.torres@gmail.com"),
+    ("Fernando Castillo Ruiz",     "CARF910825QR9", "55901234567", "fernando.castillo@gmail.com"),
+    ("Veronica Moreno Jimenez",    "MOJV880112ST0", "55012345678", "veronica.moreno@gmail.com"),
+    ("Eduardo Vargas Nunez",       "VANE950630UV1", "55123456780", "eduardo.vargas@gmail.com"),
+    ("Patricia Romero Aguilar",    "ROAP920445WX2", "55234567801", "patricia.romero@gmail.com"),
+    ("Alejandro Cruz Perez",       "CUPA870918YZ3", "55345678012", "alejandro.cruz@gmail.com"),
+    ("Isabella Jimenez Salinas",   "JISI940307AB4", "55456780123", "isabella.jimenez@gmail.com"),
+]
+
+_ALPHANUM = string.ascii_uppercase + string.digits
 
 
-def _rand(chars: str, n: int) -> str:
-    return "".join(random.choices(chars, k=n))
+def _rand(n: int) -> str:
+    return "".join(random.choices(_ALPHANUM, k=n))
 
 
-def _gen_curp() -> str:
-    return _rand(_ALPHANUM, 18)
+def _gen_curp(used: set) -> str:
+    while True:
+        c = _rand(18)
+        if c not in used:
+            used.add(c)
+            return c
 
 
-def _gen_clave() -> str:
-    return _rand(_ALPHANUM, 18)
+def _gen_ref(used: set) -> str:
+    while True:
+        r = "MD" + _rand(15)
+        if r not in used:
+            used.add(r)
+            return r
 
 
-def _gen_rfc() -> str:
-    day   = f"{random.randint(1, 28):02d}"
-    month = f"{random.randint(1, 12):02d}"
-    year  = f"{random.randint(50, 99):02d}"
-    return _rand(_UPPER, 4) + day + month + year + _rand(_ALPHANUM, 3)
-
-
-def _gen_ref() -> str:
-    return "MD" + _rand(_ALPHANUM, 15)
-
-
-def _gen_motor() -> str:
-    return _rand(_ALPHANUM, 11)
+def _gen_motor(used: set) -> str:
+    while True:
+        m = _rand(11)
+        if m not in used:
+            used.add(m)
+            return m
 
 
 # ======================================================================== #
-# Step 1 — Query existing reference data                                    #
+# Load reference data                                                        #
 # ======================================================================== #
 
 async def load_reference_data(db):
@@ -105,19 +99,12 @@ async def load_reference_data(db):
     if not dealerships:
         raise RuntimeError("No dealerships found — run seed.py first.")
 
-    via_morelos_id = next(
-        (d.dealership_id for d in dealerships if "VIA MORELOS" in d.name.upper()), None
-    )
-    ignacio_zaragoza_id = next(
-        (d.dealership_id for d in dealerships if "ZARAGOZA" in d.name.upper()), None
-    )
-    tlalpizahuac_id = next(
-        (d.dealership_id for d in dealerships if "TLALPIZAHUAC" in d.name.upper()), None
-    )
+    vm_id  = next((d.dealership_id for d in dealerships if "VIA MORELOS"  in d.name.upper()), None)
+    iz_id  = next((d.dealership_id for d in dealerships if "ZARAGOZA"     in d.name.upper()), None)
+    tlp_id = next((d.dealership_id for d in dealerships if "TLALPIZAHUAC" in d.name.upper()), None)
 
-    if not via_morelos_id or not ignacio_zaragoza_id or not tlalpizahuac_id:
-        names = [d.name for d in dealerships]
-        raise RuntimeError(f"Missing a required dealership. Found: {names}")
+    if not vm_id or not iz_id or not tlp_id:
+        raise RuntimeError(f"Missing dealership. Found: {[d.name for d in dealerships]}")
 
     catalog_rows = (await db.execute(select(MotorcycleCatalog))).scalars().all()
     if not catalog_rows:
@@ -127,66 +114,36 @@ async def load_reference_data(db):
         {
             "model_id":       c.model_id,
             "canonical_name": c.canonical_name,
-            "year":           c.year,
+            "full_price":     c.full_price,
+            "discount_price": c.discount_price,
         }
         for c in catalog_rows
     ]
 
-    color_rows = (await db.execute(select(Color))).scalars().all()
-    if not color_rows:
-        raise RuntimeError("No colors found — run seed.py first.")
-    color_name_to_id = {c.name: c.color_id for c in color_rows}
+    color_rows        = (await db.execute(select(Color))).scalars().all()
+    color_name_to_id  = {c.name: c.color_id for c in color_rows}
 
-    print(f"  via_morelos_id={via_morelos_id}, "
-          f"ignacio_zaragoza_id={ignacio_zaragoza_id}, "
-          f"tlalpizahuac_id={tlalpizahuac_id}")
-    print(f"  catalog: {len(catalog)} entries")
-    print(f"  colors: {list(color_name_to_id.keys())}")
+    efectivo = (await db.execute(
+        select(PaymentMethod).where(PaymentMethod.name == "Efectivo")
+    )).scalar_one_or_none()
+    if not efectivo:
+        raise RuntimeError("PaymentMethod 'Efectivo' not found — run seed.py first.")
 
-    return (
-        via_morelos_id,
-        ignacio_zaragoza_id,
-        tlalpizahuac_id,
-        catalog,
-        color_name_to_id,
-    )
+    return vm_id, iz_id, tlp_id, catalog, color_name_to_id, efectivo.method_id
 
 
 # ======================================================================== #
-# Step 2 — Seed 200 clients                                                 #
+# Seed 14 clients                                                            #
 # ======================================================================== #
 
-async def seed_clients(db) -> tuple:
-    """Returns (inserted_count, [client_id, ...])."""
-    count = (await db.execute(select(func.count()).select_from(Client))).scalar()
-    if count >= 200:
-        print(f"  -- clients already has {count} rows, skipping.")
-        ids = list((await db.execute(select(Client.client_id))).scalars().all())
-        return 0, ids
+async def seed_clients(db) -> list:
+    """Returns list of client_ids in insertion order (index 0-13)."""
+    used_curps = set()
+    client_ids = []
 
-    used_curps  = set()
-    used_claves = set()
-    inserted    = 0
+    for nombre, rfc, phone, email in CLIENTS_DATA:
+        curp = _gen_curp(used_curps)
 
-    for i in range(200):
-        first        = random.choice(first_names)
-        last1, last2 = random.sample(last_names, 2)
-        nombre       = f"{first} {last1} {last2}"
-        email        = f"client{i:03d}@loadtest.com"
-        phone        = f"55{i:08d}"
-
-        curp = _gen_curp()
-        while curp in used_curps:
-            curp = _gen_curp()
-        used_curps.add(curp)
-
-        clave = _gen_clave()
-        while clave in used_claves:
-            clave = _gen_clave()
-        used_claves.add(clave)
-
-        # Client.front_submission_id, back_submission_id, event_id are NOT NULL FKs.
-        # Create minimal stubs to satisfy integrity.
         event = Event(
             event_type   = EventName.client_registration.value,
             initiated_by = 2,
@@ -212,181 +169,112 @@ async def seed_clients(db) -> tuple:
         db.add(back_sub)
         await db.flush()
 
-        db.add(Client(
+        client = Client(
             nombre_completo     = nombre,
             curp                = curp,
-            clave_de_elector    = clave,
+            clave_de_elector    = rfc,
             email               = email,
             phone               = phone,
             front_submission_id = front_sub.submission_id,
             back_submission_id  = back_sub.submission_id,
             event_id            = event.event_id,
             registered_by       = 2,
-        ))
+        )
+        db.add(client)
         await db.flush()
-        inserted += 1
-
-        if inserted % 50 == 0:
-            await db.commit()
-            print(f"    ... committed {inserted} clients")
+        client_ids.append(client.client_id)
 
     await db.commit()
-    print(
-        f"  [OK] Inserted {inserted} clients "
-        f"(+ {inserted} events, {inserted * 2} submissions)."
-    )
-    ids = list((await db.execute(select(Client.client_id))).scalars().all())
-    return inserted, ids
+    print(f"[OK] Inserted {len(client_ids)} clients")
+    return client_ids
 
 
 # ======================================================================== #
-# Step 3 — Seed 200 motorcycles                                             #
+# Seed 120 motorcycles                                                       #
 # ======================================================================== #
 
-async def seed_motorcycles(
-    db,
-    via_morelos_id: int,
-    ignacio_zaragoza_id: int,
-    tlalpizahuac_id: int,
-    catalog: list,
-    color_name_to_id: dict,
-) -> tuple:
-    """
-    Returns (inserted_count, incoming_by_dealership).
-    incoming_by_dealership = {dealership_id: [{motorcycle_id, model_id, canonical_name}]}
-    """
-    count = (await db.execute(select(func.count()).select_from(Motorcycle))).scalar()
-    if count >= 200:
-        print(f"  -- motorcycles already has {count} rows, skipping.")
-        rows = (await db.execute(
-            select(Motorcycle, MotorcycleCatalog)
-            .join(MotorcycleCatalog, Motorcycle.model_id == MotorcycleCatalog.model_id)
-            .where(
-                Motorcycle.status == MotorcycleStatus.incoming,
-                Motorcycle.dealership_id.in_([via_morelos_id, ignacio_zaragoza_id]),
-            )
-        )).all()
-        incoming: dict = {}
-        for moto, cat in rows:
-            incoming.setdefault(moto.dealership_id, []).append({
-                "motorcycle_id":  moto.motorcycle_id,
-                "model_id":       moto.model_id,
-                "canonical_name": cat.canonical_name,
-            })
-        return 0, incoming
-
+async def seed_motorcycles(db, vm_id, iz_id, tlp_id, catalog, color_name_to_id) -> dict:
+    """Returns {dealership_id: [moto_dict, ...]} for all seeded motos."""
     used_refs   = set()
     used_motors = set()
     inserted    = 0
-    incoming: dict = {
-        via_morelos_id:      [],
-        ignacio_zaragoza_id: [],
-    }
+    motos_by_dealership = {vm_id: [], iz_id: [], tlp_id: []}
 
-    # (dealership_id, total, n_incoming)
-    batches = [
-        (via_morelos_id,      67, 20),
-        (ignacio_zaragoza_id, 67, 20),
-        (tlalpizahuac_id,     66,  0),
-    ]
-
-    for did, total, n_incoming in batches:
-        for i in range(total):
+    for did in [vm_id, iz_id, tlp_id]:
+        for _ in range(40):
             entry          = random.choice(catalog)
             canonical_name = entry["canonical_name"]
             color          = random.choice(VALID_COLORS[canonical_name])
-
-            ref = _gen_ref()
-            while ref in used_refs:
-                ref = _gen_ref()
-            used_refs.add(ref)
-
-            motor = _gen_motor()
-            while motor in used_motors:
-                motor = _gen_motor()
-            used_motors.add(motor)
-
-            status = (
-                MotorcycleStatus.incoming
-                if i < n_incoming
-                else MotorcycleStatus.in_stock
-            )
+            ref            = _gen_ref(used_refs)
+            motor          = _gen_motor(used_motors)
 
             moto = Motorcycle(
                 model_id         = entry["model_id"],
                 dealership_id    = did,
                 color            = color,
-                status           = status,
+                status           = MotorcycleStatus.in_stock,
                 reference_number = ref,
                 motor_number     = motor,
             )
             db.add(moto)
             await db.flush()
 
-            if status == MotorcycleStatus.incoming and did in incoming:
-                incoming[did].append({
-                    "motorcycle_id":  moto.motorcycle_id,
-                    "model_id":       entry["model_id"],
-                    "canonical_name": canonical_name,
-                })
+            motos_by_dealership[did].append({
+                "motorcycle_id":  moto.motorcycle_id,
+                "model_id":       entry["model_id"],
+                "canonical_name": canonical_name,
+                "full_price":     entry["full_price"],
+                "discount_price": entry["discount_price"],
+            })
 
             inserted += 1
-            if inserted % 50 == 0:
+            if inserted % 20 == 0:
                 await db.commit()
-                print(f"    ... committed {inserted} motorcycles")
 
     await db.commit()
-    print(
-        f"  [OK] Inserted {inserted} motorcycles "
-        f"(20 incoming Via Morelos, 20 incoming Ignacio Zaragoza, rest in_stock)."
-    )
-    return inserted, incoming
+    print(f"[OK] Inserted {inserted} motorcycles (40 per dealership, all in_stock)")
+    return motos_by_dealership
 
 
 # ======================================================================== #
-# Step 4 — Seed 60 reservations                                             #
+# Seed 6 reservations                                                        #
 # ======================================================================== #
 
 async def seed_reservations(
-    db,
-    via_morelos_id: int,
-    ignacio_zaragoza_id: int,
-    client_ids: list,
-    color_name_to_id: dict,
-    incoming: dict,
-) -> int:
-    """Returns inserted_count."""
-    count = (await db.execute(select(func.count()).select_from(Reservation))).scalar()
-    if count >= 60:
-        print(f"  -- reservations already has {count} rows, skipping.")
-        return 0
+    db, vm_id, iz_id, tlp_id,
+    client_ids, color_name_to_id, motos_by_dealership, efectivo_method_id,
+):
+    inserted      = 0
+    motos_locked  = 0
+    sales_created = 0
+    used_moto_ids = set()
 
-    inserted = 0
+    # clients 0-1 → Via Morelos, 2-3 → Ignacio Zaragoza, 4-5 → Tlalpizahuac
     plan = [
-        (via_morelos_id,      30),
-        (ignacio_zaragoza_id, 30),
+        (vm_id,  [client_ids[0], client_ids[1]]),
+        (iz_id,  [client_ids[2], client_ids[3]]),
+        (tlp_id, [client_ids[4], client_ids[5]]),
     ]
 
-    for dealership_id, n in plan:
-        pool = incoming.get(dealership_id, [])
-        if not pool:
-            print(
-                f"  WARNING: no incoming motorcycles found for dealership "
-                f"{dealership_id}, skipping its {n} reservations."
-            )
-            continue
+    for did, res_client_ids in plan:
+        available = [m for m in motos_by_dealership[did] if m["motorcycle_id"] not in used_moto_ids]
 
-        for _ in range(n):
-            moto_info      = random.choice(pool)
+        for client_id in res_client_ids:
+            moto_info = random.choice(available)
+            available = [m for m in available if m["motorcycle_id"] != moto_info["motorcycle_id"]]
+            used_moto_ids.add(moto_info["motorcycle_id"])
+
             canonical_name = moto_info["canonical_name"]
             color_name     = random.choice(VALID_COLORS[canonical_name])
             color_id       = color_name_to_id[color_name]
+            deposit_amount = round(random.uniform(2000.0, 8000.0), 2)
+            total_price    = moto_info["discount_price"] if DISCOUNTS_ACTIVE else moto_info["full_price"]
 
             reservation = Reservation(
-                client_id      = random.choice(client_ids),
+                client_id      = client_id,
                 model_id       = moto_info["model_id"],
-                dealership_id  = dealership_id,
-                deposit_amount = round(random.uniform(2000.0, 8000.0), 2),
+                dealership_id  = did,
+                deposit_amount = deposit_amount,
                 status         = ReservationStatus.active,
                 created_by     = 2,
                 event_id       = None,
@@ -395,24 +283,63 @@ async def seed_reservations(
             db.add(reservation)
             await db.flush()
 
+            reservation.status = ReservationStatus.assigned
+
             db.add(ReservationColor(
                 reservation_id = reservation.reservation_id,
                 color_id       = color_id,
                 priority       = 1,
             ))
 
-            inserted += 1
-            if inserted % 10 == 0:
+            result = await db.execute(
+                select(Motorcycle).where(Motorcycle.motorcycle_id == moto_info["motorcycle_id"])
+            )
+            moto                = result.scalar_one()
+            moto.status         = MotorcycleStatus.in_stock_reserved
+            moto.reservation_id = reservation.reservation_id
+            motos_locked       += 1
+
+            await db.flush()
+
+            sale = Sale(
+                motorcycle_id   = moto_info["motorcycle_id"],
+                client_id       = client_id,
+                vendor_id       = 2,
+                dealership_id   = did,
+                total_price     = total_price,
+                amount_verified = 0.0,
+                status          = "open",
+            )
+            db.add(sale)
+            await db.flush()
+
+            payment_event = PaymentEvent(
+                sale_id         = sale.sale_id,
+                event_type      = "reservation",
+                status          = "pending",
+                expected_amount = deposit_amount,
+                created_by      = 2,
+            )
+            db.add(payment_event)
+            await db.flush()
+
+            db.add(PaymentItem(
+                payment_event_id = payment_event.payment_event_id,
+                amount           = deposit_amount,
+                method_id        = efectivo_method_id,
+                status           = "pending",
+            ))
+
+            inserted      += 1
+            sales_created += 1
+
+            if inserted % 2 == 0:
                 await db.commit()
-                print(f"    ... committed {inserted} reservations")
 
     await db.commit()
-    print(
-        f"  [OK] Inserted {inserted} reservations "
-        f"(30 Via Morelos, 30 Ignacio Zaragoza) "
-        f"with valid colors pointing to incoming motos."
-    )
-    return inserted
+    print(f"[OK] Inserted {inserted} reservations (2 Via Morelos, 2 Ignacio Zaragoza, 2 Tlalpizahuac)")
+    print(f"[OK] {motos_locked} motos set to in_stock_reserved")
+    print(f"[OK] {sales_created} Sale + PaymentEvent + PaymentItem records created")
 
 
 # ======================================================================== #
@@ -423,54 +350,16 @@ async def seed_load_test():
     async with AsyncSessionLocal() as db:
         print("\nLoad-test seeding...\n")
 
-        (
-            via_morelos_id,
-            ignacio_zaragoza_id,
-            tlalpizahuac_id,
-            catalog,
-            color_name_to_id,
-        ) = await load_reference_data(db)
+        vm_id, iz_id, tlp_id, catalog, color_name_to_id, efectivo_method_id = \
+            await load_reference_data(db)
 
-        print("\nSeeding clients...")
-        clients_inserted, client_ids = await seed_clients(db)
-
-        print("\nSeeding motorcycles...")
-        motos_inserted, incoming = await seed_motorcycles(
-            db,
-            via_morelos_id,
-            ignacio_zaragoza_id,
-            tlalpizahuac_id,
-            catalog,
-            color_name_to_id,
+        client_ids          = await seed_clients(db)
+        motos_by_dealership = await seed_motorcycles(db, vm_id, iz_id, tlp_id, catalog, color_name_to_id)
+        await seed_reservations(
+            db, vm_id, iz_id, tlp_id,
+            client_ids, color_name_to_id, motos_by_dealership, efectivo_method_id,
         )
 
-        print("\nSeeding reservations...")
-        reservations_inserted = await seed_reservations(
-            db,
-            via_morelos_id,
-            ignacio_zaragoza_id,
-            client_ids,
-            color_name_to_id,
-            incoming,
-        )
-
-        # Final DB counts (actual state, not just what this run inserted)
-        final_clients      = (await db.execute(select(func.count()).select_from(Client))).scalar()
-        final_motos        = (await db.execute(select(func.count()).select_from(Motorcycle))).scalar()
-        final_reservations = (await db.execute(select(func.count()).select_from(Reservation))).scalar()
-
-        print(f"\n[OK] Seeded {clients_inserted} clients  (DB total: {final_clients})")
-        print(
-            f"[OK] Seeded {motos_inserted} motorcycles "
-            f"(20 incoming Via Morelos, 20 incoming Ignacio Zaragoza, rest available)"
-            f"  (DB total: {final_motos})"
-        )
-        print(
-            f"[OK] Seeded {reservations_inserted} reservations "
-            f"(30 Via Morelos, 30 Ignacio Zaragoza) "
-            f"with valid colors pointing to incoming motos"
-            f"  (DB total: {final_reservations})"
-        )
         print()
 
 

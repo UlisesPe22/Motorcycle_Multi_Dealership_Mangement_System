@@ -39,13 +39,16 @@ from models.payment_item                import PaymentItem                      
 
 from routers import events, submissions, clients, delivery_confirmations, motorcycles, reservations, sales, registrar
 from routers.declare_payment import router as declare_payment_router
+from services.scheduler import start_scheduler, stop_scheduler
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    start_scheduler()
     yield
+    stop_scheduler()
 
 
 app = FastAPI(

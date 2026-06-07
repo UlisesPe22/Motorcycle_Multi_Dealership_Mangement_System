@@ -365,7 +365,7 @@ async def _auto_assign_reservations(
         model_name  = reservation.model.canonical_name  if reservation.model  else "?"
 
         if matched_moto:
-            matched_moto.status         = MotorcycleStatus.incoming_reserved
+            matched_moto.status         = MotorcycleStatus.in_stock_reserved
             matched_moto.reservation_id = reservation.reservation_id
             reservation.status          = ReservationStatus.assigned
             assigned_moto_ids.add(matched_moto.motorcycle_id)
@@ -407,7 +407,7 @@ def _print_reservation_assignment_results(results: list[dict]) -> None:
         print(f"    Modelo:   {r['model']}")
         print(f"    Colores:  {colors}")
         if r["result"] == "ASSIGNED":
-            print(f"    Resultado: ASIGNADA -> moto #{r['moto_id']} ({r['color']})")
+            print(f"    Resultado: ASIGNADA -> reservacion #{r['reservation_id']} | moto #{r['moto_id']} ({r['color']})")
         else:
             print(f"    Resultado: {r['result']}")
     print(f"\n{'=' * width}\n")

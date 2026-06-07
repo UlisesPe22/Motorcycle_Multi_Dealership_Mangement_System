@@ -8,10 +8,11 @@ from database import Base
 class MotorcycleStatus(str, enum.Enum):
     purchased         = "purchased"
     incoming          = "incoming"
-    incoming_reserved = "incoming_reserved"
     in_stock          = "in_stock"
     in_stock_reserved = "in_stock_reserved"
     reserved_for_sale = "reserved_for_sale"
+    sale_in_progress  = "sale_in_progress"
+    fully_paid        = "fully_paid"
     not_purchased     = "not_purchased"
     rejected          = "rejected"
     sold              = "sold"
@@ -52,6 +53,7 @@ class Motorcycle(Base):
     # ------------------------------------------------------------------ #
     previous_status          = Column(String, nullable=True)
     locked_at                = Column(DateTime(timezone=True), nullable=True)
+    locked_by                = Column(Integer, ForeignKey("users.user_id"), nullable=True)
 
     # ------------------------------------------------------------------ #
     # Lifecycle                                                           #

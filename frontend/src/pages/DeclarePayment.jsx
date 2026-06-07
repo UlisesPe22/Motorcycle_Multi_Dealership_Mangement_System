@@ -2,8 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../api'
 import PageHeader from '../components/PageHeader'
-
-const LOCK_MINUTES = 15
+import { SALE_LOCK_MINUTES } from '../constants'
 const MAX_ITEMS    = 5
 const MAX_COLORS   = 3
 
@@ -203,7 +202,7 @@ export default function DeclarePayment() {
   // ── Timer helpers ─────────────────────────────────────────────────────────
   function startTimer() {
     clearInterval(timerRef.current)
-    setLockSecondsLeft(LOCK_MINUTES * 60)
+    setLockSecondsLeft(SALE_LOCK_MINUTES * 60)
     timerRef.current = setInterval(() => {
       setLockSecondsLeft(prev => {
         if (prev === null || prev <= 1) {
@@ -232,15 +231,21 @@ export default function DeclarePayment() {
       setMotorcycleId('')
       return
     }
+    const selectedMotoData = motorcycles.find(m => String(m.motorcycle_id) === String(newMotoId))
+    const isInStock        = selectedMotoData?.status === 'in_stock'
     try {
       const res = await api.post('/sales/lock-motorcycle', {
         motorcycle_id:          parseInt(newMotoId),
         previous_motorcycle_id: prevMotoId ? parseInt(prevMotoId) : null,
       })
+      if (res.data.limit_reached) {
+        alert("Has congelado demasiadas motocicletas. Espera a que se descongele una para continuar.")
+        return
+      }
       if (res.data.success) {
         setLockedMotoId(newMotoId)
         setMotorcycleId(newMotoId)
-        startTimer()
+        if (isInStock) startTimer()
       } else {
         alert(res.data.message ?? 'No se pudo reservar la moto.')
         setMotorcycleId('')
@@ -290,10 +295,30 @@ export default function DeclarePayment() {
   const selectedMoto       = motorcycles.find(m => String(m.motorcycle_id) === motorcycleId) ?? null
   const totalPrice         = selectedMoto?.price ?? selectedModel?.price ?? 0
   const paymentSum         = paymentItems.reduce((s, item) => s + (parseFloat(item.amount) || 0), 0)
-  const financingAmount    = totalPrice - paymentSum
+  const financingAmount    = totalPrice - paymentSum - (selectedMoto?.reservation_deposit || 0)
   const selectedClient     = clients.find(c => String(c.client_id) === clientId) ?? null
   const selectedDealership = dealerships.find(d => String(d.dealership_id) === dealershipId) ?? null
   const selectedFinanciera = financieras.find(f => String(f.credit_institution_id) === financieraId) ?? null
+
+  const reservationDeposit = selectedMoto?.reservation_deposit || 0
+  const remainingBalance   = Math.round((totalPrice - reservationDeposit) * 100) / 100
+  const paymentSumRounded  = Math.round(paymentSum * 100) / 100
+
+  const alContadoValid = paymentType !== 'al_contado' || Math.abs(paymentSumRounded - remainingBalance) < 0.01
+  const engancheValid  = paymentType !== 'enganche'   || paymentSumRounded <= remainingBalance
+  const amountError    = (() => {
+    if (paymentType === 'al_contado') {
+      if (paymentSumRounded > remainingBalance)
+        return `El monto declarado ($${fmt(paymentSumRounded)}) supera el saldo pendiente ($${fmt(remainingBalance)}).`
+      if (paymentSumRounded < remainingBalance && paymentSumRounded > 0)
+        return `El monto declarado ($${fmt(paymentSumRounded)}) no cubre el saldo pendiente ($${fmt(remainingBalance)}). El pago al contado debe ser exacto.`
+    }
+    if (paymentType === 'enganche') {
+      if (paymentSumRounded > remainingBalance)
+        return `El enganche declarado ($${fmt(paymentSumRounded)}) supera el saldo pendiente ($${fmt(remainingBalance)}).`
+    }
+    return null
+  })()
 
   // ── Validation per step ───────────────────────────────────────────────────
   const step2Valid = (() => {
@@ -305,7 +330,9 @@ export default function DeclarePayment() {
   const step3Valid = (() => {
     const itemsOk = paymentItems.every(item => item.method_id && parseFloat(item.amount) > 0)
     if (!itemsOk) return false
-    if (paymentType === 'enganche') return !!financieraId
+    if (paymentType === 'enganche' && !financieraId) return false
+    if (!alContadoValid) return false
+    if (!engancheValid) return false
     return true
   })()
 
@@ -355,6 +382,9 @@ export default function DeclarePayment() {
         financiera_id: paymentType === 'enganche' ? parseInt(financieraId) : null,
       }
       await api.post('/declare-payment/submit', body)
+      setLockedMotoId(null)
+      lockedRef.current = null
+      stopTimer()
       setToast({ type: 'success', message: 'Pago declarado exitosamente' })
       setTimeout(() => navigate('/'), 2000)
     } catch (e) {
@@ -363,6 +393,28 @@ export default function DeclarePayment() {
     } finally {
       setSubmitting(false)
     }
+  }
+
+  // ── Timer bar (shown on windows 2, 3, 4 when a moto is locked) ───────────
+  const TimerBar = () => {
+    if (lockSecondsLeft === null) return null
+    if (paymentType === 'reservation') return null
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+        marginBottom: '0.75rem',
+      }}>
+        <div style={{
+          padding: '0.4rem 0.85rem',
+          background: lockSecondsLeft < 120 ? '#FEF2F2' : '#EFF6FF',
+          color: lockSecondsLeft < 120 ? '#DC2626' : '#1D4ED8',
+          borderRadius: '0.4rem', fontSize: '0.82rem', fontWeight: 600,
+          border: `1px solid ${lockSecondsLeft < 120 ? '#FECACA' : '#BFDBFE'}`,
+        }}>
+          ⏱ Moto congelada por: {fmtTime(lockSecondsLeft)}
+        </div>
+      </div>
+    )
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -416,7 +468,7 @@ export default function DeclarePayment() {
           {/* ─── WINDOW 2 — Client, dealership, moto / model ─────────────── */}
           {step === 2 && (
             <div className="bi-card">
-
+              <TimerBar />
               <div className="card-section">Sucursal</div>
               <div className="upload-label">Selecciona la sucursal</div>
               <select value={dealershipId} onChange={e => setDealershipId(e.target.value)}>
@@ -510,16 +562,6 @@ export default function DeclarePayment() {
                         ))}
                       </select>
 
-                      {motorcycleId && lockSecondsLeft !== null && (
-                        <div style={{
-                          marginTop: '0.5rem', padding: '0.4rem 0.75rem',
-                          background: lockSecondsLeft < 120 ? '#FEF2F2' : '#EFF6FF',
-                          color: lockSecondsLeft < 120 ? '#DC2626' : '#1D4ED8',
-                          borderRadius: '0.4rem', fontSize: '0.82rem', fontWeight: 600, display: 'inline-block',
-                        }}>
-                          ⏱ Reservada por: {fmtTime(lockSecondsLeft)}
-                        </div>
-                      )}
                     </>
                   )}
                 </>
@@ -541,6 +583,7 @@ export default function DeclarePayment() {
           {/* ─── WINDOW 3 — Payment items ─────────────────────────────────── */}
           {step === 3 && (
             <div className="bi-card">
+              <TimerBar />
               <div className="card-section">Número de Pagos</div>
               <div className="upload-label">¿Cuántos pagos declaras?</div>
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
@@ -592,6 +635,50 @@ export default function DeclarePayment() {
                 </div>
               ))}
 
+              {(paymentType === 'al_contado' || paymentType === 'enganche') && totalPrice > 0 && (
+                <div style={{
+                  marginTop: '0.75rem', padding: '0.6rem 1rem',
+                  background: '#F8FAFC', borderRadius: '0.5rem', fontSize: '0.88rem',
+                  display: 'flex', flexDirection: 'column', gap: '0.2rem',
+                  border: '1px solid #E2E8F0',
+                }}>
+                  <div>
+                    <span style={{ color: '#64748B' }}>Precio moto: </span>
+                    <strong>${fmt(totalPrice)}</strong>
+                  </div>
+                  {reservationDeposit > 0 && (
+                    <div>
+                      <span style={{ color: '#64748B' }}>Reserva previa: </span>
+                      <strong>− ${fmt(reservationDeposit)}</strong>
+                    </div>
+                  )}
+                  <div style={{ borderTop: '1px solid #E2E8F0', paddingTop: '0.2rem' }}>
+                    <span style={{ color: '#64748B' }}>Saldo pendiente: </span>
+                    <strong>${fmt(remainingBalance)}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748B' }}>Total declarado: </span>
+                    <strong style={{ color: paymentSumRounded > remainingBalance ? '#DC2626' : '#1E293B' }}>
+                      ${fmt(paymentSumRounded)}
+                    </strong>
+                  </div>
+                  {paymentType === 'al_contado' && paymentSumRounded > 0 && alContadoValid && (
+                    <div style={{ color: '#15803D', fontWeight: 700 }}>✓ Monto exacto</div>
+                  )}
+                </div>
+              )}
+
+              {amountError && (
+                <div style={{
+                  marginTop: '0.5rem', padding: '0.6rem 1rem',
+                  background: '#FEF2F2', color: '#DC2626',
+                  borderRadius: '0.5rem', fontSize: '0.85rem', fontWeight: 600,
+                  border: '1px solid #FECACA',
+                }}>
+                  ⚠ {amountError}
+                </div>
+              )}
+
               {paymentType === 'enganche' && (
                 <>
                   <hr className="card-divider" />
@@ -608,16 +695,25 @@ export default function DeclarePayment() {
                     <div style={{
                       marginTop: '0.75rem', padding: '0.6rem 1rem',
                       background: '#F0FDF4', borderRadius: '0.5rem', fontSize: '0.88rem',
+                      display: 'flex', flexDirection: 'column', gap: '0.2rem',
                     }}>
-                      <span style={{ color: '#64748B' }}>Precio moto: </span>
-                      <strong>${fmt(totalPrice)}</strong>
-                      <span style={{ margin: '0 0.5rem', color: '#94A3B8' }}>—</span>
-                      <span style={{ color: '#64748B' }}>Enganche declarado: </span>
-                      <strong>${fmt(paymentSum)}</strong>
-                      <span style={{ margin: '0 0.5rem', color: '#94A3B8' }}>→</span>
-                      <span style={{ color: '#15803D', fontWeight: 700 }}>
+                      <div>
+                        <span style={{ color: '#64748B' }}>Precio moto: </span>
+                        <strong>${fmt(totalPrice)}</strong>
+                      </div>
+                      <div>
+                        <span style={{ color: '#64748B' }}>Enganche declarado: </span>
+                        <strong>${fmt(paymentSum)}</strong>
+                      </div>
+                      {(selectedMoto?.reservation_deposit > 0) && (
+                        <div>
+                          <span style={{ color: '#64748B' }}>Reserva previa: </span>
+                          <strong>${fmt(selectedMoto.reservation_deposit)}</strong>
+                        </div>
+                      )}
+                      <div style={{ color: '#15803D', fontWeight: 700 }}>
                         Monto a financiar: ${fmt(Math.max(0, financingAmount))}
-                      </span>
+                      </div>
                     </div>
                   )}
                 </>
@@ -639,6 +735,7 @@ export default function DeclarePayment() {
           {/* ─── WINDOW 4 — Summary + submit ─────────────────────────────── */}
           {step === 4 && (
             <div className="bi-card">
+              <TimerBar />
               <div className="card-section">Resumen del Pago</div>
 
               <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1rem', fontSize: '0.88rem' }}>
@@ -741,6 +838,14 @@ export default function DeclarePayment() {
                         <td style={{ padding: '0.35rem 0', color: '#64748B', width: '45%' }}>Financiera</td>
                         <td style={{ fontWeight: 600 }}>{selectedFinanciera.name}</td>
                       </tr>
+                      {(selectedMoto?.reservation_deposit > 0) && (
+                        <tr>
+                          <td style={{ padding: '0.35rem 0', color: '#64748B' }}>Reserva previa</td>
+                          <td style={{ fontWeight: 600, fontFamily: 'monospace' }}>
+                            ${fmt(selectedMoto.reservation_deposit)}
+                          </td>
+                        </tr>
+                      )}
                       <tr>
                         <td style={{ padding: '0.35rem 0', color: '#64748B' }}>Monto a financiar</td>
                         <td style={{ fontWeight: 700, color: '#15803D', fontFamily: 'monospace' }}>

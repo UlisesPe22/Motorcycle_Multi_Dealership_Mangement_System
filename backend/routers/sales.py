@@ -1,16 +1,16 @@
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import joinedload, selectinload
 
 from database import get_db
-from config import CONTRACTS_STORAGE_PATH, SALE_LOCK_MINUTES
+from config import CONTRACTS_STORAGE_PATH
 from models.motorcycle import Motorcycle, MotorcycleStatus
 from models.motorcycle_catalog import MotorcycleCatalog
 from models.client import Client
@@ -60,22 +60,6 @@ async def get_clients(db: AsyncSession = Depends(get_db)):
 @router.get("/motorcycles")
 async def get_motorcycles(client_id: Optional[int] = None,
                           db: AsyncSession = Depends(get_db)):
-
-    # Lazy unlock — release any expired sale locks
-    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=SALE_LOCK_MINUTES)
-    result = await db.execute(
-        select(Motorcycle).where(
-            Motorcycle.status    == MotorcycleStatus.reserved_for_sale,
-            Motorcycle.locked_at <= cutoff,
-        )
-    )
-    expired = result.scalars().all()
-    for moto in expired:
-        moto.status          = MotorcycleStatus(moto.previous_status or "in_stock")
-        moto.previous_status = None
-        moto.locked_at       = None
-    if expired:
-        await db.commit()
 
     # STEP A — Find client's reserved motorcycle
     reserved_moto_id = None
@@ -187,7 +171,24 @@ async def lock_motorcycle(body: LockMotorcycleBody, db: AsyncSession = Depends(g
                 prev.status          = MotorcycleStatus(prev.previous_status or "in_stock")
                 prev.previous_status = None
                 prev.locked_at       = None
+                prev.locked_by       = None
                 await db.flush()
+
+        # 1b. Enforce 3-moto lock limit
+        count_result = await db.execute(
+            select(func.count()).select_from(Motorcycle).where(
+                Motorcycle.status    == MotorcycleStatus.reserved_for_sale,
+                Motorcycle.locked_by == HARDCODED_USER_ID,
+            )
+        )
+        frozen_count = count_result.scalar()
+        if frozen_count >= 3:
+            await db.rollback()
+            return {
+                "success":       False,
+                "limit_reached": True,
+                "message":       "Has congelado demasiadas motocicletas. Espera a que se descongele una para continuar.",
+            }
 
         # 2. Lock new motorcycle
         result = await db.execute(
@@ -211,6 +212,7 @@ async def lock_motorcycle(body: LockMotorcycleBody, db: AsyncSession = Depends(g
         moto.previous_status = moto.status.value
         moto.status          = MotorcycleStatus.reserved_for_sale
         moto.locked_at       = now
+        moto.locked_by       = HARDCODED_USER_ID
         await db.flush()
 
         await db.commit()
@@ -249,6 +251,7 @@ async def unlock_motorcycle(body: UnlockMotorcycleBody, db: AsyncSession = Depen
         moto.status          = MotorcycleStatus(moto.previous_status or "in_stock")
         moto.previous_status = None
         moto.locked_at       = None
+        moto.locked_by       = None
 
         await db.commit()
         return {"success": True}

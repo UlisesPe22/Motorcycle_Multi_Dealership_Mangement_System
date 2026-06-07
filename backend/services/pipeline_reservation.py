@@ -9,17 +9,12 @@ from models.client import Client
 from models.dealership import Dealership
 from models.motorcycle_catalog import MotorcycleCatalog
 from models.motorcycle_catalog_color import MotorcycleCatalogColor
-from models.motorcycle import Motorcycle, MotorcycleStatus
 from models.event import Event, EventName, EventStatus
 from models.reservation import Reservation, ReservationStatus
 from models.reservation_color import ReservationColor
 from models.color import Color
 from config import HARDCODED_USER_ID
-from services.pipeline_utils import (
-    _auto_assign_reservations,
-    _print_reservation_assignment_results,
-    create_event,
-)
+from services.pipeline_utils import create_event
 
 
 async def create_reservation(db: AsyncSession, body) -> dict:
@@ -137,44 +132,14 @@ async def create_reservation(db: AsyncSession, body) -> dict:
         event.linked_entity_type = "RESERVATION"
         event.linked_entity_id   = reservation.reservation_id
 
-        # 10. Trigger A — auto-assign against incoming unassigned pool
-        result = await db.execute(
-            select(Motorcycle).where(
-                Motorcycle.dealership_id  == body.dealership_id,
-                Motorcycle.status         == MotorcycleStatus.incoming,
-                Motorcycle.reservation_id == None,
-            )
-        )
-        incoming_pool = result.scalars().all()
-
-        assigned = False
-        if incoming_pool:
-            assignment_results = await _auto_assign_reservations(
-                db, body.dealership_id, incoming_pool
-            )
-            _print_reservation_assignment_results(assignment_results)
-            assigned = any(
-                r["result"] == "ASSIGNED" and
-                r["reservation_id"] == reservation.reservation_id
-                for r in assignment_results
-            )
-
-        # 11. Commit everything atomically
+        # 10. Commit everything atomically
         await db.commit()
-
-        status_label = "assigned" if assigned else "active"
-        message = f"Reservación registrada. ID: {reservation.reservation_id}."
-        if assigned:
-            message += " Motocicleta incoming asignada automáticamente."
-        else:
-            message += " En espera de motocicleta disponible."
 
         return {
             "success":        True,
-            "message":        message,
+            "message":        f"Reservación registrada. ID: {reservation.reservation_id}. En espera de motocicleta disponible.",
             "reservation_id": reservation.reservation_id,
-            "status":         status_label,
-            "assigned":       assigned,
+            "status":         "active",
         }
 
     except HTTPException:

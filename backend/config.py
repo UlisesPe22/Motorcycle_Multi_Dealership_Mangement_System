@@ -24,7 +24,7 @@ EVENT_SLOT_DEFINITIONS = {
     "registrar_vendedor":     [],
 }
 
-SALE_LOCK_MINUTES = 15
+SALE_LOCK_MINUTES = 2
 
 MAX_PAYMENT_ITEMS_PER_EVENT = 5
 

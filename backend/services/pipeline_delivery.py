@@ -23,6 +23,8 @@ from services.pipeline_utils import (
     reject_and_return,
     check_confidence,
     mark_complete,
+    _auto_assign_reservations,
+    _print_reservation_assignment_results,
 )
 
 # ======================================================================== #
@@ -198,12 +200,11 @@ def _print_validation_results(results: list[dict]):
         if not r.get("resolved"):
             print(f"  Result:  x UNRESOLVED — no match found in pool")
         else:
-            target = "in_stock_reserved" if r.get("was_reserved") else "in_stock"
-            print(f"  Result:  + MATCHED via {r['match_via'].upper()} -> {target}")
-            if r.get("was_reserved"):
-                print(f"  * RESERVADA -> in_stock_reserved")
+            print(f"  Result:  + MATCHED via {r['match_via'].upper()} -> in_stock")
             if r.get("discrepancy"):
                 print(f"  ! Discrepancy logged: {r['discrepancy']}")
+            if r.get("auto_assigned_to_reservation_id"):
+                print(f"  * AUTO-ASSIGNED to reservation #{r['auto_assigned_to_reservation_id']}")
 
     print(f"\n{'═' * width}\n")
 
@@ -306,10 +307,7 @@ async def handle_delivery_confirmation(
         .options(selectinload(Motorcycle.model))
         .where(
             Motorcycle.dealership_id == dealership_id,
-            Motorcycle.status.in_([
-                MotorcycleStatus.incoming,
-                MotorcycleStatus.incoming_reserved,
-            ]),
+            Motorcycle.status == MotorcycleStatus.incoming,
         )
     )
     raw_incoming = result.scalars().all()
@@ -485,17 +483,13 @@ async def handle_delivery_confirmation(
         moto_id = r.get("motorcycle_id")
         if moto_id:
             moto = moto_by_id.get(moto_id)
-            r["model_name"]   = moto.model.canonical_name if moto and moto.model else "Desconocido"
-            r["year"]         = moto.model.year           if moto and moto.model else ""
-            r["was_reserved"] = (
-                moto.status == MotorcycleStatus.incoming_reserved if moto else False
-            )
-            r["motorcycle"]   = moto
+            r["model_name"] = moto.model.canonical_name if moto and moto.model else "Desconocido"
+            r["year"]       = moto.model.year           if moto and moto.model else ""
+            r["motorcycle"] = moto
         else:
-            r["model_name"]   = "Desconocido"
-            r["year"]         = ""
-            r["was_reserved"] = False
-            r["motorcycle"]   = None
+            r["model_name"] = "Desconocido"
+            r["year"]       = ""
+            r["motorcycle"] = None
 
     # 9. Print validation results to terminal
     _print_validation_results(results)
@@ -515,12 +509,17 @@ async def handle_delivery_confirmation(
     # 11. PASS 5 — Commit status transitions (all pairs resolved)
     for r in results:
         moto = r["motorcycle"]
-        if r.get("was_reserved"):
-            moto.status = MotorcycleStatus.in_stock_reserved
-        else:
-            moto.status = MotorcycleStatus.in_stock
+        moto.status = MotorcycleStatus.in_stock
         moto.delivery_confirmation_id = submission.submission_id
         await db.flush()
+
+    # 11b. Auto-assign reservations against newly in_stock motos
+    newly_in_stock = [r["motorcycle"] for r in results if r.get("resolved")]
+    if newly_in_stock:
+        assignment_results = await _auto_assign_reservations(
+            db, dealership_id, newly_in_stock
+        )
+        _print_reservation_assignment_results(assignment_results)
 
     # 12. Mark submission and event complete
     await mark_complete(
