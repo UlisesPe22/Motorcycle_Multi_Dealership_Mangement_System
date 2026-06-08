@@ -235,12 +235,14 @@ async def log_ai(
 async def reject_submission(db: AsyncSession, submission: Submission, reason: str):
     submission.status = SubmissionStatus.rejected
     submission.rejection_reason = reason
+    db.add(submission)
     await db.flush()
 
 
 async def reject_event(db: AsyncSession, event: Event, reason: str):
     event.status = EventStatus.rejected
     event.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    db.add(event)
     await db.flush()
 
 
@@ -369,6 +371,8 @@ async def _auto_assign_reservations(
             matched_moto.reservation_id = reservation.reservation_id
             reservation.status          = ReservationStatus.assigned
             assigned_moto_ids.add(matched_moto.motorcycle_id)
+            db.add(matched_moto)
+            db.add(reservation)
             await db.flush()
             results.append({
                 "reservation_id": reservation.reservation_id,
@@ -429,6 +433,8 @@ async def mark_complete(
     event.status             = EventStatus.complete
     event.completed_at       = datetime.now(timezone.utc).replace(tzinfo=None)
     event.linked_entity_type = entity_type
+    db.add(submission)
+    db.add(event)
     await db.flush()
     event.linked_entity_id   = entity_id
     await db.commit()

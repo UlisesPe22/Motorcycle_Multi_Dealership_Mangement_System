@@ -16,7 +16,23 @@ from models.client_transfer_log import ClientTransferLog
 
 
 async def get_client_activity(db: AsyncSession, client_id: int) -> dict:
-    # ── Open Sales with full details ─────────────────────────────────────────
+    # Reservations: active or assigned
+    res_result = await db.execute(
+        select(Reservation)
+        .options(
+            joinedload(Reservation.model),
+            joinedload(Reservation.dealership),
+            joinedload(Reservation.motorcycle).joinedload(Motorcycle.model),
+        )
+        .where(
+            Reservation.client_id == client_id,
+            Reservation.status.in_([ReservationStatus.active, ReservationStatus.assigned]),
+        )
+        .order_by(Reservation.created_at.desc())
+    )
+    reservations = res_result.unique().scalars().all()
+
+    # Sales: open
     sale_result = await db.execute(
         select(Sale)
         .options(
@@ -35,49 +51,43 @@ async def get_client_activity(db: AsyncSession, client_id: int) -> dict:
     )
     sales = sale_result.unique().scalars().all()
 
-    # ── Dealership IDs already covered by a reservation-type Sale ────────────
-    # A Sale covers a Reservation when: motorcycle_id IS NULL + has a PaymentEvent
-    # with event_type="reservation". Matching is by (client_id, dealership_id).
-    covered_result = await db.execute(
-        select(Sale.dealership_id)
-        .join(PaymentEvent, PaymentEvent.sale_id == Sale.sale_id)
-        .where(
-            Sale.client_id == client_id,
-            Sale.status == "open",
-            Sale.motorcycle_id.is_(None),
-            PaymentEvent.event_type == "reservation",
-        )
-    )
-    covered_dealership_ids = {row[0] for row in covered_result.fetchall()}
+    reservation_list = []
+    for r in reservations:
+        moto_details = None
+        motorcycle_id = None
+        if r.motorcycle:
+            motorcycle_id = r.motorcycle.motorcycle_id
+            moto_details = {
+                "motorcycle_id": r.motorcycle.motorcycle_id,
+                "model_name":    r.motorcycle.model.canonical_name if r.motorcycle.model else None,
+                "year":          r.motorcycle.model.year if r.motorcycle.model else None,
+                "color":         r.motorcycle.color,
+                "serie":         r.motorcycle.reference_number,
+                "motor":         r.motorcycle.motor_number,
+                "status":        r.motorcycle.status.value,
+            }
+        reservation_list.append({
+            "reservation_id":  r.reservation_id,
+            "model_name":      r.model.canonical_name,
+            "year":            r.model.year,
+            "deposit_amount":  r.deposit_amount,
+            "status":          r.status.value,
+            "dealership_name": r.dealership.name,
+            "motorcycle_id":   motorcycle_id,
+            "motorcycle":      moto_details,
+        })
 
-    # ── Reservations NOT already represented in the sales list ───────────────
-    res_result = await db.execute(
-        select(Reservation)
-        .options(
-            joinedload(Reservation.model),
-            joinedload(Reservation.dealership),
-            joinedload(Reservation.motorcycle).joinedload(Motorcycle.model),
-        )
-        .where(
-            Reservation.client_id == client_id,
-            Reservation.status.in_([ReservationStatus.active, ReservationStatus.assigned]),
-        )
-        .order_by(Reservation.created_at.desc())
-    )
-    reservations = res_result.unique().scalars().all()
-
-    # ── Build sale_list ───────────────────────────────────────────────────────
     sale_list = []
     for s in sales:
         moto_details = None
         if s.motorcycle:
             moto_details = {
-                "motorcycle_id":   s.motorcycle.motorcycle_id,
-                "model_name":      s.motorcycle.model.canonical_name if s.motorcycle.model else None,
-                "year":            s.motorcycle.model.year if s.motorcycle.model else None,
-                "color":           s.motorcycle.color,
-                "serie":           s.motorcycle.reference_number,
-                "motor":           s.motorcycle.motor_number,
+                "motorcycle_id": s.motorcycle.motorcycle_id,
+                "model_name":    s.motorcycle.model.canonical_name if s.motorcycle.model else None,
+                "year":          s.motorcycle.model.year if s.motorcycle.model else None,
+                "color":         s.motorcycle.color,
+                "serie":         s.motorcycle.reference_number,
+                "motor":         s.motorcycle.motor_number,
                 "dealership_name": s.motorcycle.dealership.name if s.motorcycle.dealership else None,
             }
 
@@ -101,77 +111,19 @@ async def get_client_activity(db: AsyncSession, client_id: int) -> dict:
             })
 
         sale_list.append({
-            "sale_id":         s.sale_id,
-            "motorcycle":      moto_details,
-            "total_price":     s.total_price,
-            "amount_verified": s.amount_verified,
-            "status":          s.status,
-            "dealership_name": s.dealership.name if s.dealership else None,
-            "events":          events_list,
+            "sale_id":          s.sale_id,
+            "motorcycle":       moto_details,
+            "total_price":      s.total_price,
+            "amount_verified":  s.amount_verified,
+            "status":           s.status,
+            "dealership_name":  s.dealership.name if s.dealership else None,
+            "events":           events_list,
         })
-
-    # ── Build standalone_reservation_list ─────────────────────────────────────
-    # Exclude reservations whose dealership is already covered by a reservation Sale
-    standalone_reservation_list = []
-    for r in reservations:
-        if r.dealership_id in covered_dealership_ids:
-            continue
-
-        moto_details = None
-        motorcycle_id = None
-        if r.motorcycle:
-            motorcycle_id = r.motorcycle.motorcycle_id
-            moto_details = {
-                "motorcycle_id": r.motorcycle.motorcycle_id,
-                "model_name":    r.motorcycle.model.canonical_name if r.motorcycle.model else None,
-                "year":          r.motorcycle.model.year if r.motorcycle.model else None,
-                "color":         r.motorcycle.color,
-                "serie":         r.motorcycle.reference_number,
-                "motor":         r.motorcycle.motor_number,
-                "status":        r.motorcycle.status.value,
-            }
-
-        standalone_reservation_list.append({
-            "reservation_id":  r.reservation_id,
-            "model_name":      r.model.canonical_name,
-            "year":            r.model.year,
-            "deposit_amount":  r.deposit_amount,
-            "status":          r.status.value,
-            "dealership_name": r.dealership.name,
-            "motorcycle_id":   motorcycle_id,
-            "motorcycle":      moto_details,
-        })
-
-    # ── All active/assigned reservations — used by transfer flow ────────────
-    all_reservations_result = await db.execute(
-        select(Reservation)
-        .options(
-            joinedload(Reservation.model),
-            joinedload(Reservation.dealership),
-        )
-        .where(
-            Reservation.client_id == client_id,
-            Reservation.status.in_([ReservationStatus.active, ReservationStatus.assigned]),
-        )
-        .order_by(Reservation.created_at.desc())
-    )
-    all_reservations = all_reservations_result.unique().scalars().all()
 
     return {
-        "client_id":               client_id,
-        "sales":                   sale_list,
-        "standalone_reservations": standalone_reservation_list,
-        "reservations": [
-            {
-                "reservation_id":  r.reservation_id,
-                "model_name":      r.model.canonical_name if r.model else "-",
-                "year":            r.model.year if r.model else "-",
-                "deposit_amount":  r.deposit_amount,
-                "status":          r.status.value,
-                "dealership_name": r.dealership.name if r.dealership else "-",
-            }
-            for r in all_reservations
-        ],
+        "client_id":    client_id,
+        "reservations": reservation_list,
+        "sales":        sale_list,
     }
 
 
@@ -333,6 +285,19 @@ async def handle_transfer_client(db: AsyncSession, body) -> dict:
         if not sale:
             raise HTTPException(status_code=404, detail="Venta no encontrada.")
         sale.client_id = body.to_client_id
+
+        if sale.motorcycle_id:
+            moto_result = await db.execute(
+                select(Motorcycle).where(Motorcycle.motorcycle_id == sale.motorcycle_id)
+            )
+            moto = moto_result.scalar_one_or_none()
+            if moto and moto.reservation_id:
+                res_result = await db.execute(
+                    select(Reservation).where(Reservation.reservation_id == moto.reservation_id)
+                )
+                linked_res = res_result.scalar_one_or_none()
+                if linked_res:
+                    linked_res.client_id = body.to_client_id
 
     if body.reservation_id:
         res_result = await db.execute(
