@@ -20,3 +20,5 @@ from models.payment_method import PaymentMethod                                 
 from models.sale            import Sale                                                 # noqa: F401
 from models.payment_event   import PaymentEvent                                         # noqa: F401
 from models.payment_item    import PaymentItem                                          # noqa: F401
+from models.manual_status_change import ManualStatusChange                              # noqa: F401
+from models.client_transfer_log  import ClientTransferLog                               # noqa: F401
