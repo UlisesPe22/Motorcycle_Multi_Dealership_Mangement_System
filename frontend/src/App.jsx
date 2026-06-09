@@ -9,7 +9,7 @@ import Delivery from './pages/Delivery'
 import DeclarePayment from './pages/DeclarePayment'
 import Placeholders from './pages/Placeholders'
 import RegisterVendedor from './pages/RegisterVendedor'
-
+import InventoryManagement from './pages/InventoryManagement'
 function AppContent() {
   return (
     <div className="app-layout">
@@ -27,6 +27,7 @@ function AppContent() {
           <Route path="/declarar-pago" element={<DeclarePayment />} />
           <Route path="/validar-venta" element={<Placeholders title="Validar Venta" />} />
           <Route path="/registrar-empleado" element={<RegisterVendedor />} />
+          <Route path="/modificar-inventario" element={<InventoryManagement />} />
         </Routes>
       </main>
     </div>
