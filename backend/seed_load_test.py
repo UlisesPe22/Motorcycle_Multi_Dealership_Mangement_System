@@ -8,10 +8,12 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 
 from database import AsyncSessionLocal
 from config import DISCOUNTS_ACTIVE
 from models.client import Client
+from models.credit_institution import CreditInstitution
 from models.color import Color
 from models.dealership import Dealership
 from models.event import Event, EventName, EventStatus, SlotName
@@ -343,6 +345,270 @@ async def seed_reservations(
 
 
 # ======================================================================== #
+# Seed verified sales for contract testing                                   #
+# ======================================================================== #
+
+async def seed_verified_sales(db, vm_id, efectivo_method_id):
+    terminal_banamex_method = (await db.execute(
+        select(PaymentMethod).where(PaymentMethod.name == "Terminal Banamex")
+    )).scalar_one_or_none()
+    if not terminal_banamex_method:
+        raise RuntimeError("PaymentMethod 'Terminal Banamex' not found.")
+    terminal_banamex_method_id = terminal_banamex_method.method_id
+
+    financiera_method = (await db.execute(
+        select(PaymentMethod).where(PaymentMethod.name == "Financiera")
+    )).scalar_one_or_none()
+    if not financiera_method:
+        raise RuntimeError("PaymentMethod 'Financiera' not found.")
+    financiera_method_id = financiera_method.method_id
+
+    first_credit_institution = (await db.execute(
+        select(CreditInstitution).limit(1)
+    )).scalar_one_or_none()
+    if not first_credit_institution:
+        raise RuntimeError("No CreditInstitution found.")
+    first_credit_institution_id = first_credit_institution.credit_institution_id
+
+    motos_result = await db.execute(
+        select(Motorcycle)
+        .options(joinedload(Motorcycle.model))
+        .where(
+            Motorcycle.dealership_id == vm_id,
+            Motorcycle.status == MotorcycleStatus.in_stock,
+        )
+        .limit(3)
+    )
+    motos = motos_result.unique().scalars().all()
+    if len(motos) < 3:
+        raise RuntimeError(f"Not enough in_stock motos at Via Morelos. Found {len(motos)}.")
+    moto1, moto2, moto3 = motos[0], motos[1], motos[2]
+
+    used_curps = set()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    async def _make_client(nombre, rfc, phone, email):
+        curp = _gen_curp(used_curps)
+        event = Event(
+            event_type   = EventName.client_registration.value,
+            initiated_by = 2,
+            status       = EventStatus.complete,
+            started_at   = now,
+        )
+        db.add(event)
+        await db.flush()
+        front_sub = Submission(
+            event_id    = event.event_id,
+            slot_number = 1,
+            slot_name   = SlotName.id_front.value,
+            status      = SubmissionStatus.complete,
+        )
+        back_sub = Submission(
+            event_id    = event.event_id,
+            slot_number = 2,
+            slot_name   = SlotName.id_back.value,
+            status      = SubmissionStatus.complete,
+        )
+        db.add(front_sub)
+        db.add(back_sub)
+        await db.flush()
+        client = Client(
+            nombre_completo     = nombre,
+            curp                = curp,
+            clave_de_elector    = rfc,
+            email               = email,
+            phone               = phone,
+            front_submission_id = front_sub.submission_id,
+            back_submission_id  = back_sub.submission_id,
+            event_id            = event.event_id,
+            registered_by       = 2,
+        )
+        db.add(client)
+        await db.flush()
+        return client
+
+    # ── Client 1 — Al Contado with prior Reservation ─────────────────────
+    client1 = await _make_client(
+        "Diego Armando Solis Vargas", "SOVD910315HM2", "55119988776", "diego.solis@gmail.com"
+    )
+    total1 = moto1.model.full_price
+    sale1 = Sale(
+        motorcycle_id   = moto1.motorcycle_id,
+        client_id       = client1.client_id,
+        vendor_id       = 2,
+        dealership_id   = vm_id,
+        total_price     = total1,
+        amount_verified = total1,
+        status          = SaleStatus.verified.value,
+        created_at      = now,
+    )
+    db.add(sale1)
+    await db.flush()
+
+    ev1_res = PaymentEvent(
+        sale_id         = sale1.sale_id,
+        event_type      = "reservation",
+        status          = "verified",
+        expected_amount = 5000.0,
+        created_by      = 2,
+        created_at      = now,
+    )
+    db.add(ev1_res)
+    await db.flush()
+    db.add(PaymentItem(
+        payment_event_id = ev1_res.payment_event_id,
+        amount           = 5000.0,
+        method_id        = efectivo_method_id,
+        status           = "verified",
+        created_at       = now,
+    ))
+
+    ev1_cto = PaymentEvent(
+        sale_id         = sale1.sale_id,
+        event_type      = "al_contado",
+        status          = "verified",
+        expected_amount = total1 - 5000.0,
+        created_by      = 2,
+        created_at      = now,
+    )
+    db.add(ev1_cto)
+    await db.flush()
+    db.add(PaymentItem(
+        payment_event_id = ev1_cto.payment_event_id,
+        amount           = total1 - 5000.0,
+        method_id        = efectivo_method_id,
+        status           = "verified",
+        created_at       = now,
+    ))
+    moto1.status = MotorcycleStatus.sale_in_progress
+    await db.flush()
+
+    # ── Client 2 — Enganche with prior Reservation ────────────────────────
+    client2 = await _make_client(
+        "Lorena Isabel Mora Fuentes", "MOFL940822MN3", "55229877665", "lorena.mora@gmail.com"
+    )
+    total2 = moto2.model.full_price
+    sale2 = Sale(
+        motorcycle_id   = moto2.motorcycle_id,
+        client_id       = client2.client_id,
+        vendor_id       = 2,
+        dealership_id   = vm_id,
+        total_price     = total2,
+        amount_verified = total2,
+        status          = SaleStatus.verified.value,
+        created_at      = now,
+    )
+    db.add(sale2)
+    await db.flush()
+
+    ev2_res = PaymentEvent(
+        sale_id         = sale2.sale_id,
+        event_type      = "reservation",
+        status          = "verified",
+        expected_amount = 3000.0,
+        created_by      = 2,
+        created_at      = now,
+    )
+    db.add(ev2_res)
+    await db.flush()
+    db.add(PaymentItem(
+        payment_event_id = ev2_res.payment_event_id,
+        amount           = 3000.0,
+        method_id        = efectivo_method_id,
+        status           = "verified",
+        created_at       = now,
+    ))
+
+    ev2_eng = PaymentEvent(
+        sale_id         = sale2.sale_id,
+        event_type      = "enganche",
+        status          = "verified",
+        expected_amount = 18000.0,
+        created_by      = 2,
+        created_at      = now,
+    )
+    db.add(ev2_eng)
+    await db.flush()
+    db.add(PaymentItem(
+        payment_event_id = ev2_eng.payment_event_id,
+        amount           = 10000.0,
+        method_id        = efectivo_method_id,
+        status           = "verified",
+        created_at       = now,
+    ))
+    db.add(PaymentItem(
+        payment_event_id = ev2_eng.payment_event_id,
+        amount           = 8000.0,
+        method_id        = terminal_banamex_method_id,
+        status           = "verified",
+        created_at       = now,
+    ))
+
+    financing_amount2 = total2 - 3000.0 - 10000.0 - 8000.0
+    ev2_fin = PaymentEvent(
+        sale_id         = sale2.sale_id,
+        event_type      = "financing",
+        status          = "verified",
+        expected_amount = financing_amount2,
+        created_by      = 2,
+        created_at      = now,
+    )
+    db.add(ev2_fin)
+    await db.flush()
+    db.add(PaymentItem(
+        payment_event_id = ev2_fin.payment_event_id,
+        amount           = financing_amount2,
+        method_id        = financiera_method_id,
+        financiera_id    = first_credit_institution_id,
+        status           = "verified",
+        created_at       = now,
+    ))
+    moto2.status = MotorcycleStatus.sale_in_progress
+    await db.flush()
+
+    # ── Client 3 — Al Contado only (no reservation) ───────────────────────
+    client3 = await _make_client(
+        "Hector Emmanuel Ruiz Avila", "RUAH881107KL4", "55339766554", "hector.ruiz@gmail.com"
+    )
+    total3 = moto3.model.full_price
+    sale3 = Sale(
+        motorcycle_id   = moto3.motorcycle_id,
+        client_id       = client3.client_id,
+        vendor_id       = 2,
+        dealership_id   = vm_id,
+        total_price     = total3,
+        amount_verified = total3,
+        status          = SaleStatus.verified.value,
+        created_at      = now,
+    )
+    db.add(sale3)
+    await db.flush()
+
+    ev3_cto = PaymentEvent(
+        sale_id         = sale3.sale_id,
+        event_type      = "al_contado",
+        status          = "verified",
+        expected_amount = total3,
+        created_by      = 2,
+        created_at      = now,
+    )
+    db.add(ev3_cto)
+    await db.flush()
+    db.add(PaymentItem(
+        payment_event_id = ev3_cto.payment_event_id,
+        amount           = total3,
+        method_id        = efectivo_method_id,
+        status           = "verified",
+        created_at       = now,
+    ))
+    moto3.status = MotorcycleStatus.sale_in_progress
+    await db.flush()
+
+    await db.commit()
+    print("[OK] Inserted 3 clients with verified sales for contract testing")
+
+
+# ======================================================================== #
 # Entry point                                                                #
 # ======================================================================== #
 
@@ -359,6 +625,9 @@ async def seed_load_test():
             db, vm_id, iz_id, tlp_id,
             client_ids, color_name_to_id, motos_by_dealership, efectivo_method_id,
         )
+
+        # ── Verified sales for contract testing ──────────────────────────────────
+        await seed_verified_sales(db, vm_id, efectivo_method_id)
 
         print()
 

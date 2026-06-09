@@ -19,6 +19,9 @@ from models.contract import Contract, SaleType, ContractPaymentMethod
 from models.credit_institution import CreditInstitution
 from models.event import Event, EventName, EventStatus
 from models.reservation import Reservation, ReservationStatus
+from models.sale import Sale, SaleStatus
+from models.payment_event import PaymentEvent
+from models.payment_item import PaymentItem
 from models.user import User
 from config import HARDCODED_USER_ID
 from services.pipeline_contract import (
@@ -386,6 +389,209 @@ async def create_sale(body: SaleCreateBody, db: AsyncSession = Depends(get_db)):
             "contract_id":     contract.contract_id,
             "contract_number": contract_number,
             "has_solicitud":   body.sale_type == "credito",
+        }
+
+    except Exception as e:
+        await db.rollback()
+        return {"success": False, "message": str(e)}
+
+
+# ======================================================================== #
+# GET /sales/contract-data/{sale_id}                                        #
+# ======================================================================== #
+
+@router.get("/contract-data/{sale_id}")
+async def get_contract_data(sale_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Sale)
+        .options(
+            joinedload(Sale.client),
+            joinedload(Sale.motorcycle).options(
+                joinedload(Motorcycle.model),
+                joinedload(Motorcycle.dealership),
+            ),
+            selectinload(Sale.events).selectinload(PaymentEvent.items).selectinload(PaymentItem.financiera),
+        )
+        .where(Sale.sale_id == sale_id)
+    )
+    sale = result.unique().scalar_one_or_none()
+    if not sale:
+        raise HTTPException(status_code=404, detail="Venta no encontrada.")
+
+    has_enganche = any(ev.event_type == "enganche" for ev in sale.events)
+    sale_type    = "credito" if has_enganche else "contado"
+
+    payment_institution_id   = None
+    payment_institution_name = None
+    for ev in sale.events:
+        for item in ev.items:
+            if item.financiera_id:
+                payment_institution_id   = item.financiera_id
+                payment_institution_name = item.financiera.name if item.financiera else None
+                break
+        if payment_institution_id:
+            break
+
+    payment_downpayment = sum(
+        item.amount
+        for ev in sale.events if ev.event_type != "financing"
+        for item in ev.items
+    )
+
+    client = sale.client
+    moto   = sale.motorcycle
+
+    return {
+        "sale_id":   sale_id,
+        "sale_type": sale_type,
+        "client": {
+            "client_id":       client.client_id,
+            "nombre_completo": client.nombre_completo,
+            "curp":            client.curp,
+            "email":           client.email or "",
+            "phone":           client.phone or "",
+            "domicilio":       client.domicilio or "",
+        } if client else None,
+        "motorcycle": {
+            "motorcycle_id":   moto.motorcycle_id,
+            "model_name":      moto.model.canonical_name if moto.model else "",
+            "year":            moto.model.year if moto.model else "",
+            "color":           moto.color or "",
+            "serie":           moto.reference_number or "",
+            "motor":           moto.motor_number or "",
+            "dealership_id":   moto.dealership_id,
+            "dealership_name": moto.dealership.name if moto.dealership else "",
+        } if moto else None,
+        "payment_downpayment":      payment_downpayment,
+        "payment_institution_id":   payment_institution_id,
+        "payment_institution_name": payment_institution_name,
+        "total_price": sale.total_price,
+    }
+
+
+# ======================================================================== #
+# POST /sales/generate-contract                                              #
+# ======================================================================== #
+
+class GenerateContractBody(BaseModel):
+    sale_id:            int
+    payment_method:     str
+    reference_name:     Optional[str] = None
+    reference_phone:    Optional[str] = None
+    reference_relation: Optional[str] = None
+    buyer_colonia:      Optional[str] = None
+    buyer_cp:           Optional[str] = None
+    buyer_municipio:    Optional[str] = None
+    buyer_estado:       Optional[str] = None
+    payment_bank:       Optional[str] = None
+
+
+@router.post("/generate-contract")
+async def generate_contract(body: GenerateContractBody, db: AsyncSession = Depends(get_db)):
+    try:
+        result = await db.execute(
+            select(Sale)
+            .options(
+                joinedload(Sale.motorcycle).joinedload(Motorcycle.dealership),
+                selectinload(Sale.events).selectinload(PaymentEvent.items),
+            )
+            .where(Sale.sale_id == body.sale_id)
+        )
+        sale = result.unique().scalar_one_or_none()
+        if not sale:
+            return {"success": False, "message": "Venta no encontrada."}
+
+        if sale.status != SaleStatus.verified.value:
+            return {"success": False, "message": "La venta debe estar en estado 'verificado' para generar contrato."}
+
+        if not sale.motorcycle_id:
+            return {"success": False, "message": "La venta no tiene motocicleta asignada."}
+
+        has_enganche  = any(ev.event_type == "enganche" for ev in sale.events)
+        sale_type_val = SaleType.credito if has_enganche else SaleType.contado
+
+        payment_downpayment = sum(
+            item.amount
+            for ev in sale.events if ev.event_type != "financing"
+            for item in ev.items
+        )
+        payment_institution_id = None
+        for ev in sale.events:
+            for item in ev.items:
+                if item.financiera_id:
+                    payment_institution_id = item.financiera_id
+                    break
+            if payment_institution_id:
+                break
+
+        moto         = sale.motorcycle
+        dealership_id = moto.dealership_id
+
+        contract_number = await generate_contract_number(db, dealership_id)
+        now   = datetime.now(timezone.utc).replace(tzinfo=None)
+        event = await create_event(db, EventName.sale_validation.value, HARDCODED_USER_ID)
+
+        contract = Contract(
+            contract_number        = contract_number,
+            sale_event_id          = event.event_id,
+            client_id              = sale.client_id,
+            motorcycle_id          = sale.motorcycle_id,
+            dealership_id          = dealership_id,
+            employee_id            = HARDCODED_USER_ID,
+            sale_type              = sale_type_val,
+            payment_method         = ContractPaymentMethod(body.payment_method),
+            payment_downpayment    = payment_downpayment if sale_type_val == SaleType.credito else None,
+            payment_institution_id = payment_institution_id,
+            payment_bank           = body.payment_bank,
+            reference_name         = body.reference_name,
+            reference_phone        = body.reference_phone,
+            reference_relation     = body.reference_relation,
+            buyer_colonia          = body.buyer_colonia,
+            buyer_cp               = body.buyer_cp,
+            buyer_municipio        = body.buyer_municipio,
+            buyer_estado           = body.buyer_estado,
+            created_at             = now,
+        )
+        db.add(contract)
+        await db.flush()
+
+        result = await db.execute(
+            select(Contract)
+            .options(
+                selectinload(Contract.client),
+                selectinload(Contract.motorcycle).selectinload(Motorcycle.model),
+                selectinload(Contract.dealership),
+                selectinload(Contract.employee),
+                selectinload(Contract.institution),
+            )
+            .where(Contract.contract_id == contract.contract_id)
+        )
+        loaded_contract = result.scalar_one()
+
+        await generate_documents(loaded_contract, db)
+
+        moto.status          = MotorcycleStatus.sold
+        moto.previous_status = None
+        moto.locked_at       = None
+        await db.flush()
+
+        sale.status = SaleStatus.complete.value
+        await db.flush()
+
+        event.status             = EventStatus.complete
+        event.completed_at       = now
+        event.linked_entity_type = "CONTRACT"
+        event.linked_entity_id   = contract.contract_id
+        await db.flush()
+
+        await db.commit()
+
+        return {
+            "success":         True,
+            "contract_id":     contract.contract_id,
+            "contract_number": contract_number,
+            "has_solicitud":   sale_type_val == SaleType.credito,
+            "message":         "Contrato generado exitosamente.",
         }
 
     except Exception as e:

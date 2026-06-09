@@ -11,6 +11,7 @@ import Placeholders from './pages/Placeholders'
 import RegisterVendedor from './pages/RegisterVendedor'
 import InventoryManagement from './pages/InventoryManagement'
 import VendorSales from './pages/VendorSales'
+import CreateContract from './pages/CreateContract'
 function AppContent() {
   return (
     <div className="app-layout">
@@ -30,6 +31,7 @@ function AppContent() {
           <Route path="/registrar-empleado" element={<RegisterVendedor />} />
           <Route path="/modificar-inventario" element={<InventoryManagement />} />
           <Route path="/mis-ventas" element={<VendorSales />} />
+          <Route path="/crear-contrato/:sale_id" element={<CreateContract />} />
         </Routes>
       </main>
     </div>

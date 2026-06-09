@@ -45,8 +45,7 @@ async def get_client_activity(db: AsyncSession, client_id: int) -> dict:
         )
         .where(
             Sale.client_id == client_id,
-            Sale.status == SaleStatus.open.value,
-        )
+            Sale.status.in_([SaleStatus.open.value, SaleStatus.verified.value]),)
         .order_by(Sale.created_at.desc())
     )
     sales = sale_result.unique().scalars().all()
@@ -121,17 +120,17 @@ async def get_client_activity(db: AsyncSession, client_id: int) -> dict:
         })
 
     return {
-        "client_id":    client_id,
-        "reservations": reservation_list,
-        "sales":        sale_list,
+        "client_id":               client_id,
+        "reservations":            reservation_list,
+        "standalone_reservations": reservation_list,  # both keys for cancel/transfer flow compatibility
+        "sales":                   sale_list,
     }
-
 
 async def handle_cancel_activity(db: AsyncSession, body) -> dict:
     if body.sale_id is None and body.reservation_id is None:
         raise HTTPException(status_code=400, detail="Se requiere sale_id o reservation_id.")
 
-    # ── Cancel reservation only ──────────────────────────────────────────────
+    # ── CASE 1: CANCEL RESERVATION ONLY ──────────────────────────────────────
     if body.sale_id is None:
         res_result = await db.execute(
             select(Reservation).where(Reservation.reservation_id == body.reservation_id)
@@ -142,7 +141,7 @@ async def handle_cancel_activity(db: AsyncSession, body) -> dict:
 
         reservation.status = ReservationStatus.cancelled
 
-        # If a motorcycle has this reservation linked and is in_stock_reserved, free it
+        # Find the motorcycle holding this reservation and free it
         moto_result = await db.execute(
             select(Motorcycle).where(Motorcycle.reservation_id == body.reservation_id)
         )
@@ -152,47 +151,45 @@ async def handle_cancel_activity(db: AsyncSession, body) -> dict:
             moto.reservation_id = None
 
         db.add(ManualStatusChange(
-            event_type=     "reservation_cancelled",
-            reservation_id= body.reservation_id,
-            reason=         body.reason,
-            performed_by=   HARDCODED_USER_ID,
+            event_type="reservation_cancelled",
+            reservation_id=body.reservation_id,
+            reason=body.reason,
+            performed_by=HARDCODED_USER_ID,
         ))
-
         await db.commit()
         return {"success": True, "message": "Reservación cancelada.", "total_refund": 0.0}
 
-    # ── Cancel sale ──────────────────────────────────────────────────────────
+    # ── CASE 2: CANCEL SALE (Auto-cancels linked reservation via Motorcycle) ──
     sale_result = await db.execute(
         select(Sale)
         .options(
             selectinload(Sale.events).selectinload(PaymentEvent.items),
             joinedload(Sale.motorcycle),
         )
-        .where(Sale.sale_id == body.sale_id)
+        .where(
+            Sale.sale_id == body.sale_id,
+            Sale.status.in_([SaleStatus.open.value, SaleStatus.verified.value])  # Fixed safety check
+        )
     )
     sale = sale_result.unique().scalar_one_or_none()
     if not sale:
-        raise HTTPException(status_code=404, detail="Venta no encontrada.")
+        raise HTTPException(status_code=404, detail="Venta no encontrada o no elegible para cancelación.")
 
     sale.status = "cancelled"
 
     total_refund = 0.0
     for ev in sale.events:
-        if ev.event_type == "financing":
-            continue
+        if ev.event_type == "financing" or ev.status != "completed":
+            continue  
         ev.status = "refunded"
         for item in ev.items:
             item.status = "refunded"
             total_refund += item.amount
 
-    # Handle motorcycle
+    # Handle motorcycle & its linked reservation cleanly
     if sale.motorcycle_id:
-        moto_result = await db.execute(
-            select(Motorcycle).where(Motorcycle.motorcycle_id == sale.motorcycle_id)
-        )
-        moto = moto_result.scalar_one_or_none()
+        moto = sale.motorcycle
         if moto:
-            # If moto has a linked reservation, cancel it
             if moto.reservation_id:
                 linked_res_result = await db.execute(
                     select(Reservation).where(Reservation.reservation_id == moto.reservation_id)
@@ -202,33 +199,25 @@ async def handle_cancel_activity(db: AsyncSession, body) -> dict:
                     linked_res.status = ReservationStatus.cancelled
                 moto.reservation_id = None
 
-            moto.status          = MotorcycleStatus.in_stock
-            moto.locked_at       = None
-            moto.locked_by       = None
+            moto.status = MotorcycleStatus.in_stock
+            moto.locked_at = None
+            moto.locked_by = None
             moto.previous_status = None
 
-    # Cancel separately-provided reservation if any
-    if body.reservation_id:
-        extra_res_result = await db.execute(
-            select(Reservation).where(Reservation.reservation_id == body.reservation_id)
-        )
-        extra_res = extra_res_result.scalar_one_or_none()
-        if extra_res:
-            extra_res.status = ReservationStatus.cancelled
-
     db.add(ManualStatusChange(
-        event_type=   "sale_cancelled",
-        sale_id=      body.sale_id,
-        reason=       body.reason,
-        performed_by= HARDCODED_USER_ID,
+        event_type="sale_cancelled",
+        sale_id=body.sale_id,
+        reason=body.reason,
+        performed_by=HARDCODED_USER_ID,
     ))
 
     await db.commit()
     return {
-        "success":      True,
-        "message":      f"Venta cancelada. Monto a reembolsar: ${total_refund:.2f}",
+        "success": True,
+        "message": f"Venta cancelada. Monto a reembolsar: ${total_refund:.2f}",
         "total_refund": total_refund,
     }
+
 
 
 async def handle_reject_moto(db: AsyncSession, body) -> dict:

@@ -94,7 +94,7 @@ async def build_contract_replacements(contract, db: AsyncSession) -> dict:
     result = await db.execute(
         select(MotorcycleModelCode).where(
             MotorcycleModelCode.model_id == catalog.model_id
-        )
+        ).limit(1)
     )
     code_entry = result.scalar_one_or_none()
     moto_code = code_entry.modelo_code if code_entry else ""

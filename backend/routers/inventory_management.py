@@ -47,7 +47,7 @@ async def clients_with_activity(db: AsyncSession = Depends(get_db)):
         .where(
             or_(
                 Client.client_id.in_(
-                    select(Sale.client_id).where(Sale.status == SaleStatus.open.value)
+                    select(Sale.client_id).where(Sale.status.in_(["open", "verified"]))
                 ),
                 Client.client_id.in_(
                     select(Reservation.client_id).where(
