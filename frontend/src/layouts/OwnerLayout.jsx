@@ -9,9 +9,9 @@ export const OWNER_NAV = [
   { path: '/registrar-empleado', icon: '◈', label: 'Registrar Gerente' },
 ]
 
-export default function OwnerLayout() {
+export default function OwnerLayout({ switcherProps }) {
   return (
-    <AppShell navItems={OWNER_NAV}>
+    <AppShell navItems={OWNER_NAV} switcherProps={switcherProps}>
       <Routes>
         <Route path="/dashboard" element={<OwnerDashboard />} />
         <Route path="/registrar-empleado" element={<RegisterVendedor />} />

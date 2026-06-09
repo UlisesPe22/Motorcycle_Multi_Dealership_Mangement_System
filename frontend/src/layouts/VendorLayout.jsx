@@ -12,9 +12,9 @@ export const VENDOR_NAV = [
   { path: '/registrar-cliente', icon: '+', label: 'Registrar Cliente' },
 ]
 
-export default function VendorLayout() {
+export default function VendorLayout({ switcherProps }) {
   return (
-    <AppShell navItems={VENDOR_NAV}>
+    <AppShell navItems={VENDOR_NAV} switcherProps={switcherProps}>
       <Routes>
         <Route path="/declarar-pago" element={<DeclarePayment />} />
         <Route path="/mis-ventas" element={<VendorSales />} />

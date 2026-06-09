@@ -26,9 +26,9 @@ export const MANAGER_NAV = [
   { path: '/registrar-empleado',   icon: '◈', label: 'Registrar Empleado' },
 ]
 
-export default function ManagerLayout() {
+export default function ManagerLayout({ switcherProps }) {
   return (
-    <AppShell navItems={MANAGER_NAV}>
+    <AppShell navItems={MANAGER_NAV} switcherProps={switcherProps}>
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/registrar-cliente" element={<RegisterClient />} />

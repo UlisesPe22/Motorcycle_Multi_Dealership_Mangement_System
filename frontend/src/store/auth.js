@@ -23,3 +23,13 @@ export function clearAuth() {
 export function isAuthenticated() {
   return !!getToken()
 }
+
+const INTERFACE_KEY = 'bajaj_interface'
+
+export function saveInterface(role) {
+  localStorage.setItem(INTERFACE_KEY, role)
+}
+
+export function getSavedInterface() {
+  return localStorage.getItem(INTERFACE_KEY) || null
+}

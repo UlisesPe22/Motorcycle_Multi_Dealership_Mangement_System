@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import { getUser } from './store/auth'
+import { getUser, getSavedInterface, saveInterface } from './store/auth'
 
 // Auth
 import Login from './pages/auth/Login'
@@ -8,16 +9,32 @@ import Login from './pages/auth/Login'
 import ManagerLayout from './layouts/ManagerLayout'
 import VendorLayout  from './layouts/VendorLayout'
 import OwnerLayout   from './layouts/OwnerLayout'
+import MasterLayout  from './layouts/MasterLayout'
 
 function RoleRouter() {
-  // During development: if not authenticated, default to manager interface
   const user = getUser()
   const role = user?.role || 'manager'
 
-  if (role === 'vendor') return <VendorLayout />
-  if (role === 'owner')  return <OwnerLayout />
-  // master + manager share the manager interface for now
-  return <ManagerLayout />
+  const [masterInterface, setMasterInterface] = useState(
+    role === 'master' ? (getSavedInterface() || 'manager') : role
+  )
+
+  function handleSwitch(newInterface, path) {
+    saveInterface(newInterface)
+    setMasterInterface(newInterface)
+    window.location.href = path
+  }
+
+  const activeInterface = role === 'master' ? masterInterface : role
+
+  const switcherProps = role === 'master'
+    ? { currentInterface: masterInterface, onSwitch: handleSwitch }
+    : null
+
+  if (activeInterface === 'vendor')  return <VendorLayout  switcherProps={switcherProps} />
+  if (activeInterface === 'owner')   return <OwnerLayout   switcherProps={switcherProps} />
+  if (activeInterface === 'master')  return <MasterLayout  switcherProps={switcherProps} />
+  return <ManagerLayout switcherProps={switcherProps} />
 }
 
 export default function App() {

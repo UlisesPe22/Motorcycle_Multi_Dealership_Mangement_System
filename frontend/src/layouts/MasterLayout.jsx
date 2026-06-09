@@ -7,9 +7,9 @@ export const MASTER_NAV = [
   { path: '/', icon: '⊞', label: 'Panel Master' },
 ]
 
-export default function MasterLayout() {
+export default function MasterLayout({ switcherProps }) {
   return (
-    <AppShell navItems={MASTER_NAV}>
+    <AppShell navItems={MASTER_NAV} switcherProps={switcherProps}>
       <Routes>
         <Route path="/" element={<MasterDashboard />} />
         <Route path="*" element={<Navigate to="/" replace />} />
