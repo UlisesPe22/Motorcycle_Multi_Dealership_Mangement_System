@@ -29,3 +29,14 @@ SALE_LOCK_MINUTES = 2
 MAX_PAYMENT_ITEMS_PER_EVENT = 5
 
 HARDCODED_USER_ID = 2
+
+# Auth
+SECRET_KEY        = "moto_app_secret_key_change_in_production"
+ALGORITHM         = "HS256"
+ACCESS_TOKEN_EXPIRE_HOURS = 8
+
+# Email (Mailhog for dev)
+MAIL_HOST      = "mailhog"
+MAIL_PORT      = 1025
+MAIL_FROM      = "noreply@bajaj.com"
+MAIL_FROM_NAME = "Bajaj Sistema"

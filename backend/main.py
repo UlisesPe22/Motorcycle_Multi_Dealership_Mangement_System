@@ -40,6 +40,7 @@ from models.manual_status_change        import ManualStatusChange               
 from models.client_transfer_log         import ClientTransferLog                      # noqa
 
 from routers import events, submissions, clients, delivery_confirmations, motorcycles, reservations, sales, registrar
+from routers.auth import router as auth_router
 from routers.declare_payment import router as declare_payment_router
 from routers.inventory_management import router as inventory_management_router
 from routers.vendor_sales import router as vendor_sales_router
@@ -70,6 +71,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(events.router)
 app.include_router(submissions.router)
 app.include_router(clients.router)

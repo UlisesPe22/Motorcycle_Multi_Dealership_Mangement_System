@@ -1,47 +1,32 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import Navbar from './components/Navbar'
-import Dashboard from './pages/Dashboard'
-import RegisterClient from './pages/RegisterClient'
-import ClientList from './pages/ClientList'
-import PurchaseOrder from './pages/PurchaseOrder'
-import OrderConfirmation from './pages/OrderConfirmation'
-import Delivery from './pages/Delivery'
-import DeclarePayment from './pages/DeclarePayment'
-import Placeholders from './pages/Placeholders'
-import RegisterVendedor from './pages/RegisterVendedor'
-import InventoryManagement from './pages/InventoryManagement'
-import VendorSales from './pages/VendorSales'
-import CreateContract from './pages/CreateContract'
-function AppContent() {
-  return (
-    <div className="app-layout">
-      <aside className="sidebar">
-        <Navbar />
-      </aside>
-      <main className="main-content">
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/registrar-cliente" element={<RegisterClient />} />
-          <Route path="/clientes" element={<ClientList />} />
-          <Route path="/orden-compra" element={<PurchaseOrder />} />
-          <Route path="/orden-traslado" element={<OrderConfirmation />} />
-          <Route path="/registrar-entrega" element={<Delivery />} />
-          <Route path="/declarar-pago" element={<DeclarePayment />} />
-          <Route path="/validar-venta" element={<Placeholders title="Validar Venta" />} />
-          <Route path="/registrar-empleado" element={<RegisterVendedor />} />
-          <Route path="/modificar-inventario" element={<InventoryManagement />} />
-          <Route path="/mis-ventas" element={<VendorSales />} />
-          <Route path="/crear-contrato/:sale_id" element={<CreateContract />} />
-        </Routes>
-      </main>
-    </div>
-  )
+import { getUser } from './store/auth'
+
+// Auth
+import Login from './pages/auth/Login'
+
+// Layouts
+import ManagerLayout from './layouts/ManagerLayout'
+import VendorLayout  from './layouts/VendorLayout'
+import OwnerLayout   from './layouts/OwnerLayout'
+
+function RoleRouter() {
+  // During development: if not authenticated, default to manager interface
+  const user = getUser()
+  const role = user?.role || 'manager'
+
+  if (role === 'vendor') return <VendorLayout />
+  if (role === 'owner')  return <OwnerLayout />
+  // master + manager share the manager interface for now
+  return <ManagerLayout />
 }
 
 export default function App() {
   return (
     <BrowserRouter>
-      <AppContent />
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/*" element={<RoleRouter />} />
+      </Routes>
     </BrowserRouter>
   )
 }

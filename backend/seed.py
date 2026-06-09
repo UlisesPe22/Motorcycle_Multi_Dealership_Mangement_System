@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sqlalchemy import select, func
 
 from database import AsyncSessionLocal
-from models.user                     import User, UserRole
+from models.user                     import User
 from models.dealership               import Dealership
 from models.motorcycle_catalog       import MotorcycleCatalog
 from models.motorcycle_model_code    import MotorcycleModelCode
@@ -21,18 +21,59 @@ from models.payment_item             import PaymentItem   # noqa: F401 — regis
 
 
 async def seed_users(db):
-    count = (await db.execute(select(func.count()).select_from(User))).scalar()
-    if count > 0:
-        print("  → users already seeded, skipping.")
-        return
-
+    from services.auth import hash_password
     users = [
-        User(name="eskeleton", role=UserRole.admin),
-        User(name="eskeleton", role=UserRole.employee),
+        {
+            "name":     "Ulises Perez",
+            "email":    "perez.ulisesernesto@gmail.com",
+            "username": "perez.ulisesernesto",
+            "password": "22",
+            "role":     "master",
+            "dealership_id": None,
+        },
+        {
+            "name":     "Owner Test",
+            "email":    "owner@bajaj.com",
+            "username": "owner",
+            "password": "test123",
+            "role":     "owner",
+            "dealership_id": None,
+        },
+        {
+            "name":     "Manager Test",
+            "email":    "manager@bajaj.com",
+            "username": "manager",
+            "password": "test123",
+            "role":     "manager",
+            "dealership_id": 1,  # Via Morelos (first seeded dealership)
+        },
+        {
+            "name":     "Vendor Test",
+            "email":    "vendor@bajaj.com",
+            "username": "vendor",
+            "password": "test123",
+            "role":     "vendor",
+            "dealership_id": 1,
+        },
     ]
-    db.add_all(users)
+    inserted = 0
+    for u in users:
+        existing = await db.execute(select(User).where(User.email == u["email"]))
+        if existing.scalar_one_or_none():
+            continue
+        db.add(User(
+            name            = u["name"],
+            email           = u["email"],
+            username        = u["username"],
+            hashed_password = hash_password(u["password"]),
+            role            = u["role"],
+            dealership_id   = u["dealership_id"],
+            is_active       = True,
+            created_by      = None,
+        ))
+        inserted += 1
     await db.commit()
-    print(f"  ✓ Inserted {len(users)} users.")
+    print(f"  [OK] Inserted {inserted} users.")
 
 
 async def seed_dealerships(db):
@@ -266,8 +307,8 @@ async def seed_payment_methods(db):
 async def seed():
     async with AsyncSessionLocal() as db:
         print("\nSeeding database...")
-        await seed_users(db)
         await seed_dealerships(db)
+        await seed_users(db)
         await seed_credit_institutions(db)
         await seed_payment_methods(db)
         await seed_colors(db)

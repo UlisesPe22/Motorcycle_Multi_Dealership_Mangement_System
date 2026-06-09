@@ -1,0 +1,22 @@
+import { Routes, Route, Navigate } from 'react-router-dom'
+import AppShell from './AppShell'
+
+import OwnerDashboard from '../pages/owner/OwnerDashboard'
+import RegisterVendedor from '../pages/RegisterVendedor'
+
+export const OWNER_NAV = [
+  { path: '/dashboard',          icon: '⊞', label: 'Dashboard' },
+  { path: '/registrar-empleado', icon: '◈', label: 'Registrar Gerente' },
+]
+
+export default function OwnerLayout() {
+  return (
+    <AppShell navItems={OWNER_NAV}>
+      <Routes>
+        <Route path="/dashboard" element={<OwnerDashboard />} />
+        <Route path="/registrar-empleado" element={<RegisterVendedor />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+    </AppShell>
+  )
+}

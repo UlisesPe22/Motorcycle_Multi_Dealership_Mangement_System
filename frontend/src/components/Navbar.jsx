@@ -1,21 +1,22 @@
 import { useLocation, useNavigate } from 'react-router-dom'
+import { getUser, clearAuth, isAuthenticated } from '../store/auth'
 
-const NAV_MAIN = [
-  { path: '/',                    icon: '⊞', label: 'Panel Principal' },
-  { path: '/registrar-cliente',   icon: '+', label: 'Registrar Cliente' },
-  { path: '/clientes',            icon: '○', label: 'Buscar Cliente' },
-  { path: '/orden-compra',        icon: '≡', label: 'Orden de Compra' },
-  { path: '/orden-traslado',      icon: '▷', label: 'Orden de Traslado' },
-  { path: '/registrar-entrega',   icon: '✔', label: 'Registrar Entrega' },
-  { path: '/declarar-pago',       icon: '◇', label: 'Declarar Pago' },
-  { path: '/registrar-empleado',  icon: '◈', label: 'Registrar Empleado' },
-  { path: '/modificar-inventario', icon: '✕', label: 'Modificar Inventario' },
-  { path: '/mis-ventas',           icon: '◉', label: 'Mis Ventas' },
-]
+const ROLE_LABELS = {
+  master:  'Master',
+  owner:   'Dueño',
+  manager: 'Gerente',
+  vendor:  'Vendedor',
+}
 
-export default function Navbar() {
+export default function Navbar({ navItems = [] }) {
   const location = useLocation()
   const navigate = useNavigate()
+  const user = getUser()
+
+  function handleLogout() {
+    clearAuth()
+    navigate('/login')
+  }
 
   return (
     <>
@@ -26,7 +27,7 @@ export default function Navbar() {
 
       <div className="sidebar-section">Operaciones</div>
 
-      {NAV_MAIN.map(({ path, icon, label }) => {
+      {navItems.map(({ path, icon, label }) => {
         const isActive = location.pathname === path
         return isActive ? (
           <div key={path} className="sidebar-nav-active">
@@ -43,6 +44,34 @@ export default function Navbar() {
         )
       })}
 
+      <div style={{ flex: 1 }} />
+
+      {user && (
+        <div style={{
+          padding: '0.9rem 1.1rem',
+          borderTop: '1px solid rgba(255,255,255,0.07)',
+        }}>
+          <div style={{ color: 'rgba(255,255,255,0.85)', fontSize: '0.78rem', fontWeight: 600 }}>
+            {user.name}
+          </div>
+          <div style={{
+            color: 'rgba(255,255,255,0.32)', fontSize: '0.6rem',
+            letterSpacing: '0.1em', textTransform: 'uppercase', marginTop: '2px',
+          }}>
+            {ROLE_LABELS[user.role] || user.role}
+          </div>
+        </div>
+      )}
+
+      {isAuthenticated() && (
+        <button
+          className="sidebar-nav-item"
+          onClick={handleLogout}
+          style={{ paddingTop: '0.5rem', paddingBottom: '0.9rem' }}
+        >
+          ⏻&nbsp;&nbsp;Cerrar sesión
+        </button>
+      )}
     </>
   )
 }

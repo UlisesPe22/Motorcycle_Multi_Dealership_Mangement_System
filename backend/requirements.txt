@@ -60,3 +60,7 @@ urllib3==2.7.0
 uvicorn==0.46.0
 websockets==16.0
 watchfiles==0.21.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+aiosmtplib==3.0.1
