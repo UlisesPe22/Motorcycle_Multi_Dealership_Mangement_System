@@ -14,7 +14,7 @@ from models.payment_item import PaymentItem
 from models.payment_method import PaymentMethod
 from models.reservation import Reservation, ReservationStatus
 from models.reservation_color import ReservationColor
-from models.sale import Sale
+from models.sale import Sale, SaleStatus
 
 
 async def handle_payment_declaration(db: AsyncSession, body) -> dict:
@@ -55,7 +55,7 @@ async def handle_payment_declaration(db: AsyncSession, body) -> dict:
         result = await db.execute(
             select(Sale).where(
                 Sale.motorcycle_id == body.motorcycle_id,
-                Sale.status        == "open",
+                Sale.status        == SaleStatus.open.value,
             ).limit(1)
         )
         sale = result.scalar_one_or_none()
@@ -64,7 +64,7 @@ async def handle_payment_declaration(db: AsyncSession, body) -> dict:
             select(Sale).where(
                 Sale.client_id     == body.client_id,
                 Sale.motorcycle_id == None,  # noqa: E711
-                Sale.status        == "open",
+                Sale.status        == SaleStatus.open.value,
             ).limit(1)
         )
         sale = result.scalar_one_or_none()
@@ -77,7 +77,7 @@ async def handle_payment_declaration(db: AsyncSession, body) -> dict:
             dealership_id   = body.dealership_id,
             total_price     = total_price,
             amount_verified = 0.0,
-            status          = "open",
+            status          = SaleStatus.open.value,
         )
         db.add(sale)
         await db.flush()

@@ -8,7 +8,7 @@ from sqlalchemy import select, or_
 from database import get_db
 from models.client import Client
 from models.reservation import Reservation, ReservationStatus
-from models.sale import Sale
+from models.sale import Sale, SaleStatus
 
 router = APIRouter(prefix="/inventory-management", tags=["inventory_management"])
 
@@ -47,7 +47,7 @@ async def clients_with_activity(db: AsyncSession = Depends(get_db)):
         .where(
             or_(
                 Client.client_id.in_(
-                    select(Sale.client_id).where(Sale.status == "open")
+                    select(Sale.client_id).where(Sale.status == SaleStatus.open.value)
                 ),
                 Client.client_id.in_(
                     select(Reservation.client_id).where(

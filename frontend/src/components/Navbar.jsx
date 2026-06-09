@@ -10,6 +10,7 @@ const NAV_MAIN = [
   { path: '/declarar-pago',       icon: '◇', label: 'Declarar Pago' },
   { path: '/registrar-empleado',  icon: '◈', label: 'Registrar Empleado' },
   { path: '/modificar-inventario', icon: '✕', label: 'Modificar Inventario' },
+  { path: '/mis-ventas',           icon: '◉', label: 'Mis Ventas' },
 ]
 
 export default function Navbar() {

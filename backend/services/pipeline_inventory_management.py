@@ -8,7 +8,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from config import HARDCODED_USER_ID
 from models.motorcycle import Motorcycle, MotorcycleStatus
 from models.reservation import Reservation, ReservationStatus
-from models.sale import Sale
+from models.sale import Sale, SaleStatus
 from models.payment_event import PaymentEvent
 from models.payment_item import PaymentItem
 from models.manual_status_change import ManualStatusChange
@@ -45,7 +45,7 @@ async def get_client_activity(db: AsyncSession, client_id: int) -> dict:
         )
         .where(
             Sale.client_id == client_id,
-            Sale.status == "open",
+            Sale.status == SaleStatus.open.value,
         )
         .order_by(Sale.created_at.desc())
     )

@@ -22,7 +22,7 @@ from models.payment_item import PaymentItem
 from models.payment_method import PaymentMethod
 from models.reservation import Reservation, ReservationStatus
 from models.reservation_color import ReservationColor
-from models.sale import Sale
+from models.sale import Sale, SaleStatus
 from models.submission import Submission, SubmissionStatus
 
 # ======================================================================== #
@@ -308,7 +308,7 @@ async def seed_reservations(
                 dealership_id   = did,
                 total_price     = total_price,
                 amount_verified = 0.0,
-                status          = "open",
+                status          = SaleStatus.open.value,
             )
             db.add(sale)
             await db.flush()

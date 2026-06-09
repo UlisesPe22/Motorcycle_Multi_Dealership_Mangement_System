@@ -42,6 +42,7 @@ from models.client_transfer_log         import ClientTransferLog                
 from routers import events, submissions, clients, delivery_confirmations, motorcycles, reservations, sales, registrar
 from routers.declare_payment import router as declare_payment_router
 from routers.inventory_management import router as inventory_management_router
+from routers.vendor_sales import router as vendor_sales_router
 from services.scheduler import start_scheduler, stop_scheduler
 
 
@@ -79,6 +80,7 @@ app.include_router(sales.router)
 app.include_router(registrar.router)
 app.include_router(declare_payment_router)
 app.include_router(inventory_management_router)
+app.include_router(vendor_sales_router)
 
 
 @app.get("/")
