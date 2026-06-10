@@ -15,6 +15,8 @@ from models.payment_method import PaymentMethod
 from models.reservation import Reservation, ReservationStatus
 from models.reservation_color import ReservationColor
 from models.sale import Sale, SaleStatus
+from services.token_service import generate_payment_token
+from services.email_service import send_payment_confirmation_email
 
 
 async def handle_payment_declaration(db: AsyncSession, body) -> dict:
@@ -52,6 +54,7 @@ async def handle_payment_declaration(db: AsyncSession, body) -> dict:
 
     # 3. Get or create Sale
     if body.motorcycle_id:
+        # First: try to find existing sale by motorcycle_id
         result = await db.execute(
             select(Sale).where(
                 Sale.motorcycle_id == body.motorcycle_id,
@@ -59,7 +62,41 @@ async def handle_payment_declaration(db: AsyncSession, body) -> dict:
             ).limit(1)
         )
         sale = result.scalar_one_or_none()
+
+        # Second: if not found, check if this client has an open
+        # reservation Sale (motorcycle_id=NULL) — bridge the gap
+        if not sale:
+            result = await db.execute(
+                select(Sale).where(
+                    Sale.client_id     == body.client_id,
+                    Sale.motorcycle_id == None,  # noqa: E711
+                    Sale.status        == SaleStatus.open.value,
+                ).limit(1)
+            )
+            sale = result.scalar_one_or_none()
+            if sale:
+                # Assign the motorcycle to this existing reservation sale
+                sale.motorcycle_id = body.motorcycle_id
+                sale.total_price   = total_price
+                await db.flush()
+
+        # Third: no existing sale at all — create new
+        if not sale:
+            sale = Sale(
+                motorcycle_id   = body.motorcycle_id,
+                client_id       = body.client_id,
+                vendor_id       = HARDCODED_USER_ID,
+                dealership_id   = body.dealership_id,
+                total_price     = total_price,
+                amount_verified = 0.0,
+                status          = SaleStatus.open.value,
+            )
+            db.add(sale)
+            await db.flush()
+
     else:
+        # Reservation case — find or create the client's open
+        # reservation Sale (motorcycle_id=NULL).
         result = await db.execute(
             select(Sale).where(
                 Sale.client_id     == body.client_id,
@@ -68,19 +105,18 @@ async def handle_payment_declaration(db: AsyncSession, body) -> dict:
             ).limit(1)
         )
         sale = result.scalar_one_or_none()
-
-    if not sale:
-        sale = Sale(
-            motorcycle_id   = body.motorcycle_id,
-            client_id       = body.client_id,
-            vendor_id       = HARDCODED_USER_ID,
-            dealership_id   = body.dealership_id,
-            total_price     = total_price,
-            amount_verified = 0.0,
-            status          = SaleStatus.open.value,
-        )
-        db.add(sale)
-        await db.flush()
+        if not sale:
+            sale = Sale(
+                motorcycle_id   = None,
+                client_id       = body.client_id,
+                vendor_id       = HARDCODED_USER_ID,
+                dealership_id   = body.dealership_id,
+                total_price     = total_price,
+                amount_verified = 0.0,
+                status          = SaleStatus.open.value,
+            )
+            db.add(sale)
+            await db.flush()
 
     # 4. Enforce one event per type per sale
     result = await db.execute(
@@ -113,7 +149,7 @@ async def handle_payment_declaration(db: AsyncSession, body) -> dict:
             payment_event_id = payment_event.payment_event_id,
             amount           = item.amount,
             method_id        = item.method_id,
-            status           = "pending",
+            status           = "open",
         ))
     await db.flush()
 
@@ -182,7 +218,7 @@ async def handle_payment_declaration(db: AsyncSession, body) -> dict:
             amount           = financing_amount,
             method_id        = financiera_method.method_id,
             financiera_id    = body.financiera_id,
-            status           = "pending",
+            status           = "open",
         ))
         await db.flush()
 
@@ -230,6 +266,18 @@ async def handle_payment_declaration(db: AsyncSession, body) -> dict:
 
     # 9. Commit
     await db.commit()
+
+    # 10. Fire the client payment-confirmation email. This is best-effort:
+    #     an SMTP failure must never break the payment declaration response.
+    try:
+        token = await generate_payment_token(db, payment_event.payment_event_id)
+        await db.commit()
+        await send_payment_confirmation_email(payment_event.payment_event_id, db, token)
+    except Exception as e:
+        print(
+            f"[email] payment confirmation email failed for event "
+            f"{payment_event.payment_event_id}: {e}"
+        )
 
     return {
         "success":          True,

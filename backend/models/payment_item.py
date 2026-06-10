@@ -13,7 +13,7 @@ class PaymentItem(Base):
     method_id         = Column(Integer, ForeignKey("payment_methods.method_id"),        nullable=False)
     financiera_id     = Column(Integer, ForeignKey("credit_institutions.credit_institution_id"), nullable=True)
     reference_input   = Column(String,                                                  nullable=True)
-    status            = Column(String,  default="pending",                              nullable=False)
+    status            = Column(String,  default="open",                                 nullable=False)
     created_at        = Column(DateTime, server_default=func.now(),                     nullable=False)
 
     event      = relationship("PaymentEvent",    back_populates="items")

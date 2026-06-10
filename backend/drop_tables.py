@@ -3,6 +3,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from sqlalchemy import text
 from database import engine, Base
 
 from models.user                        import User                                  # noqa: F401
@@ -31,7 +32,9 @@ import asyncio
 async def drop_all_tables():
     print("Dropping all tables...")
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text("DROP SCHEMA public CASCADE"))
+        await conn.execute(text("CREATE SCHEMA public"))
+    await engine.dispose()
     print("Done. All tables dropped.")
 
 if __name__ == "__main__":

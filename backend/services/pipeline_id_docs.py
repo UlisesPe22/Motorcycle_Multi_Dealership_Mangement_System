@@ -23,6 +23,8 @@ from models.event       import Event, EventStatus
 from models.submission  import Submission, SubmissionStatus
 from models.ai_analysis_log import AIAnalysisLog
 from models.client      import Client
+from models.unconfirmed_client import UnconfirmedClient
+from services.token_service import new_token, expiry_from_now
 from schemas.gemini_responses import (
     Phase1Response,
     Phase2FrontResponse,
@@ -313,9 +315,21 @@ async def run_phase1(db: AsyncSession, submission: Submission, event: Event) -> 
     return True, phase1.user_message
 
 
-async def run_phase2(db: AsyncSession, event: Event) -> tuple[bool, str]:
+async def run_phase2(
+    db: AsyncSession,
+    event: Event,
+    email: str,
+    phone: str,
+) -> tuple[bool, str]:
     """
     Phase 2 — Data extraction + cross-validation + client creation.
+
+    The Gemini extraction and MRZ cross-validation are unchanged. The only
+    difference from the original flow is the final insert: instead of writing a
+    usable Client row, we stage the record in unconfirmed_clients with a
+    confirmation token. The client becomes a real Client only after they click
+    the activation link (see routers/clients.py::activate_client). email/phone
+    come from the registration form and are required by the staging table.
     """
     result = await db.execute(
         select(Submission).where(Submission.event_id == event.event_id)
@@ -461,30 +475,40 @@ async def run_phase2(db: AsyncSession, event: Event) -> tuple[bool, str]:
             f"ya se encuentra registrado con ID {existing.client_id}."
         )
 
-    client = Client(
+    # Stage the client in unconfirmed_clients with a confirmation token.
+    # It is copied into the real clients table only on activation.
+    pending = UnconfirmedClient(
         nombre_completo   = field_val(front_fields, "nombre_completo"),
         curp              = field_val(front_fields, "curp"),
         clave_de_elector  = field_val(front_fields, "clave_de_elector"),
         fecha_nacimiento  = field_val(front_fields, "fecha_nacimiento"),
         domicilio         = field_val(front_fields, "domicilio"),
-        front_submission_id  = front_sub.submission_id,
-        back_submission_id   = back_sub.submission_id,
-        event_id             = event.event_id,
-        registered_by        = event.initiated_by,
+        email             = email,
+        phone             = phone,
+        front_submission_id = front_sub.submission_id,
+        back_submission_id  = back_sub.submission_id,
+        event_id            = event.event_id,
+        registered_by       = event.initiated_by,
+        registered_at       = datetime.now(timezone.utc),
+        confirmation_token  = new_token(),
+        token_expires_at    = expiry_from_now(),
+        status              = "pending",
     )
-    db.add(client)
+    db.add(pending)
 
     front_sub.status = SubmissionStatus.complete
     back_sub.status  = SubmissionStatus.complete
     event.status     = EventStatus.complete
     event.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
-    event.linked_entity_type = "CLIENT"
+    event.linked_entity_type = "PENDING_CLIENT"
 
     await db.flush()
-    event.linked_entity_id = client.client_id
+    event.linked_entity_id = pending.pending_client_id
     await db.commit()
 
-    return True, f"Cliente registrado exitosamente. ID: {client.client_id}"
+    return True, (
+        "Registro recibido. Se ha enviado un correo de activación al cliente."
+    )
 
 
 async def handle_client_registration(

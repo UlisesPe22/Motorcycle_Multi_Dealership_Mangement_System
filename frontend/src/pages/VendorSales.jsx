@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../api'
 import { fmt } from '../utils'
+import Toast from '../components/Toast'
 
 // ─── Palette ────────────────────────────────────────────────────────────────
 const BLUE   = '#1A73E8'
@@ -65,6 +66,14 @@ export default function VendorSales() {
   const [search, setSearch]     = useState('')
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState(null)
+  const [toast, setToast]       = useState(null)
+  const [resendingId, setResendingId] = useState(null)
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 4000)
+    return () => clearTimeout(t)
+  }, [toast])
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -85,6 +94,22 @@ export default function VendorSales() {
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
+  // Resend the confirmation email for every expired payment event of a sale.
+  const handleResend = useCallback(async (sale) => {
+    setResendingId(sale.sale_id)
+    try {
+      for (const eventId of sale.expired_payment_event_ids) {
+        await api.post(`/payments/resend-confirmation/${eventId}`)
+      }
+      setToast({ type: 'success', message: '✓ Correo reenviado al cliente' })
+      await fetchAll()
+    } catch {
+      setToast({ type: 'error', message: 'Error al reenviar — intenta de nuevo' })
+    } finally {
+      setResendingId(null)
+    }
+  }, [fetchAll])
+
   // Client-side search filter
   const filtered = search.trim()
     ? sales.filter(s => {
@@ -99,6 +124,7 @@ export default function VendorSales() {
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
+      <Toast toast={toast} onClose={() => setToast(null)} />
       {/* shimmer keyframe */}
       <style>{`
         @keyframes shimmer {
@@ -341,6 +367,8 @@ export default function VendorSales() {
                     key={sale.sale_id}
                     sale={sale}
                     onContract={() => navigate(`/crear-contrato/${sale.sale_id}`)}
+                    onResend={() => handleResend(sale)}
+                    resending={resendingId === sale.sale_id}
                   />
                 ))}
               </tbody>
@@ -365,7 +393,7 @@ function TableHead() {
   )
 }
 
-function SaleRow({ sale, onContract }) {
+function SaleRow({ sale, onContract, onResend, resending }) {
   return (
     <tr>
       {/* Modelo */}
@@ -379,7 +407,35 @@ function SaleRow({ sale, onContract }) {
       </td>
 
       {/* Cliente */}
-      <td style={{ fontWeight: 400 }}>{sale.client_name}</td>
+      <td style={{ fontWeight: 400 }}>
+        <div>{sale.client_name}</div>
+        {sale.has_expired_confirmation && (
+          <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              background: '#FEF3E2', color: ORANGE, border: `1px solid #F8D8AE`,
+              borderRadius: 12, padding: '2px 10px', fontSize: 12, fontWeight: 600,
+              whiteSpace: 'nowrap',
+            }}>
+              ⚠ Confirmación expirada
+            </span>
+            <button
+              onClick={onResend}
+              disabled={resending}
+              style={{
+                padding: '4px 12px', borderRadius: 4, fontSize: 12, fontWeight: 600,
+                border: `1px solid ${ORANGE}`,
+                background: resending ? '#F8F9FA' : '#fff',
+                color: resending ? '#BDBDBD' : ORANGE,
+                cursor: resending ? 'not-allowed' : 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {resending ? 'Reenviando…' : 'Reenviar correo'}
+            </button>
+          </div>
+        )}
+      </td>
 
       {/* Pagos (hidden on mobile) */}
       <td className="col-pagos" style={{ color: GREY }}>

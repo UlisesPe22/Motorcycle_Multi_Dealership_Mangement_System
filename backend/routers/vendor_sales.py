@@ -9,6 +9,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from database import get_db
 from config import HARDCODED_USER_ID
 from models.motorcycle import Motorcycle
+from models.payment_confirmation_token import PaymentConfirmationToken
 from models.payment_event import PaymentEvent
 from models.reservation import Reservation, ReservationStatus
 from models.sale import Sale, SaleStatus
@@ -77,6 +78,30 @@ async def vendor_sales_active(
     )
     sales = result.unique().scalars().all()
 
+    # Load confirmation-token status for every payment event in these sales,
+    # so the UI can surface a "resend confirmation email" affordance.
+    all_event_ids = [ev.payment_event_id for sale in sales for ev in sale.events]
+    token_by_event: dict[int, PaymentConfirmationToken] = {}
+    if all_event_ids:
+        tok_result = await db.execute(
+            select(PaymentConfirmationToken).where(
+                PaymentConfirmationToken.payment_event_id.in_(all_event_ids)
+            )
+        )
+        token_by_event = {t.payment_event_id: t for t in tok_result.scalars().all()}
+
+    now = datetime.now(timezone.utc)
+
+    def confirmation_status(payment_event_id: int):
+        tok = token_by_event.get(payment_event_id)
+        if tok is None:
+            return None
+        if tok.status == "verified":
+            return "verified"
+        if tok.status == "expired" or tok.expires_at < now:
+            return "expired"
+        return "pending"
+
     output = []
     for sale in sales:
         model_name    = None
@@ -114,6 +139,10 @@ async def vendor_sales_active(
                     model_name = reservation.model.canonical_name
                     year       = reservation.model.year
 
+            # No resolvable model yet for this reservation-only sale.
+            if model_name is None:
+                model_name = "Reserva — modelo pendiente"
+
         client_name = sale.client.nombre_completo if sale.client else "—"
 
         non_financing_events = [ev for ev in sale.events if ev.event_type != "financing"]
@@ -123,8 +152,23 @@ async def vendor_sales_active(
         ) or "—"
 
         all_items      = [item for ev in sale.events for item in ev.items]
+        non_financing_items = [item for ev in non_financing_events for item in ev.items]
         total_count    = len(all_items)
-        verified_count = sum(1 for item in all_items if item.status == "verified")
+        verified_count = sum(1 for item in non_financing_items if item.status == "verified")
+
+        payment_events = [
+            {
+                "payment_event_id":    ev.payment_event_id,
+                "event_type":          ev.event_type,
+                "confirmation_status": confirmation_status(ev.payment_event_id),
+            }
+            for ev in sale.events
+        ]
+        expired_payment_event_ids = [
+            pe["payment_event_id"]
+            for pe in payment_events
+            if pe["confirmation_status"] == "expired"
+        ]
 
         row = {
             "sale_id":           sale.sale_id,
@@ -141,6 +185,9 @@ async def vendor_sales_active(
             "contract_unlocked": sale.status == SaleStatus.verified.value,
             "motorcycle_id":     motorcycle_id,
             "reservation_id":    reservation_id,
+            "payment_events":            payment_events,
+            "expired_payment_event_ids": expired_payment_event_ids,
+            "has_expired_confirmation":  len(expired_payment_event_ids) > 0,
         }
 
         if search:

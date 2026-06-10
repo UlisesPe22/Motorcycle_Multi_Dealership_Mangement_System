@@ -40,3 +40,10 @@ MAIL_HOST      = "mailhog"
 MAIL_PORT      = 1025
 MAIL_FROM      = "noreply@bajaj.com"
 MAIL_FROM_NAME = "Bajaj Sistema"
+
+# Email verification tokens (client activation + payment confirmation)
+TOKEN_EXPIRY_MINUTES = 60
+
+# Public base URL used to build the activation / confirmation links that go
+# into emails. In dev the client opens these straight against the backend.
+PUBLIC_BASE_URL = "http://localhost:8000"

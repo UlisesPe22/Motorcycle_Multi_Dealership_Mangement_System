@@ -115,16 +115,22 @@ async def _get_reservation_deposit(
         if total > 0:
             return total
 
-    # Fallback — find by client_id with no moto assigned yet
+    # Fallback — find reservation deposit for this client + model regardless
+    # of whether a motorcycle has been assigned to the sale yet.
     result = await db.execute(
         select(func.sum(PaymentItem.amount))
         .join(PaymentEvent, PaymentItem.payment_event_id == PaymentEvent.payment_event_id)
         .join(Sale, PaymentEvent.sale_id == Sale.sale_id)
+        .join(Reservation, Reservation.client_id == Sale.client_id)
         .where(
             PaymentEvent.event_type == "reservation",
             Sale.client_id          == client_id,
-            Sale.motorcycle_id      == None,  # noqa: E711
             Sale.status             == "open",
+            Reservation.model_id    == model_id,
+            Reservation.status.in_([
+                ReservationStatus.active,
+                ReservationStatus.assigned,
+            ]),
         )
     )
     return result.scalar() or 0.0

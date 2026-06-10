@@ -7,9 +7,10 @@ GET  /clients/{id}      — get one client with full detail
 """
 
 import os
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -17,10 +18,17 @@ from sqlalchemy.orm import selectinload
 from config import STORAGE_ROOT, HARDCODED_USER_ID
 from database import get_db
 from models.client import Client
+from models.unconfirmed_client import UnconfirmedClient
 from models.event import EventName, SlotName
 from models.submission import Submission
 from services.pipeline_id_docs import handle_client_registration, run_phase2
 from services.pipeline_utils import create_event, save_upload_to_disk
+from services.token_service import get_unconfirmed_client_by_token
+from services.email_service import send_client_activation_email
+from services.confirmation_pages import (
+    render_client_activated_page,
+    render_token_expired_page,
+)
 
 router = APIRouter(prefix="/clients", tags=["clients"])
 
@@ -83,29 +91,89 @@ async def register_client(
     if not success_back:
         return {"success": False, "message": message_back}
 
-    # Phase 2 — extraction + cross-validation + client creation
-    success_p2, message_p2 = await run_phase2(db, event)
+    clean_email = email.strip().lower()
+    clean_phone = phone.strip()
+
+    # Phase 2 — extraction + cross-validation + staging into unconfirmed_clients
+    success_p2, message_p2 = await run_phase2(db, event, clean_email, clean_phone)
     if not success_p2:
         return {"success": False, "message": message_p2}
 
-    # Attach contact data to the newly created client
+    # Fetch the staged client and send the activation email.
     result = await db.execute(
-        select(Client).where(Client.event_id == event.event_id)
+        select(UnconfirmedClient).where(UnconfirmedClient.event_id == event.event_id)
     )
-    client = result.scalar_one_or_none()
-    if client:
-        client.email = email.strip().lower()
-        client.phone = phone.strip()
-        await db.commit()
-    else:
-        return {"success": False, "message": "Error al guardar datos de contacto."}
+    pending = result.scalar_one_or_none()
+    if not pending:
+        return {"success": False, "message": "Error al registrar datos del cliente."}
+
+    activation_email_sent = True
+    try:
+        await send_client_activation_email(pending, pending.confirmation_token)
+    except Exception as e:  # never fail the registration over an SMTP error
+        activation_email_sent = False
+        print(f"[email] activation email failed for pending_client {pending.pending_client_id}: {e}")
 
     return {
-        "success":   True,
-        "message":   message_p2,
-        "client_id": client.client_id,
-        "event_id":  event.event_id,
+        "success":               True,
+        "message":               message_p2,
+        "client_id":             pending.pending_client_id,
+        "event_id":              event.event_id,
+        "activation_email_sent": activation_email_sent,
     }
+
+
+@router.get("/activate", response_class=HTMLResponse)
+async def activate_client(token: str, db: AsyncSession = Depends(get_db)):
+    """
+    Client clicks the activation link from their email. On success the staged
+    record is copied into the real clients table and becomes usable. Idempotent:
+    re-clicking an already-activated link shows the success page again.
+    """
+    pending = await get_unconfirmed_client_by_token(db, token)
+    if not pending:
+        return HTMLResponse(render_token_expired_page(), status_code=404)
+
+    # Already activated — show success page idempotently.
+    if pending.status == "confirmed":
+        return HTMLResponse(render_client_activated_page(pending.nombre_completo))
+
+    # Expired (flagged or lapsed).
+    if pending.status == "expired" or pending.token_expires_at < datetime.now(timezone.utc):
+        pending.status = "expired"
+        await db.commit()
+        return HTMLResponse(render_token_expired_page(), status_code=410)
+
+    # Duplicate check against the real clients table (different session / race).
+    dup = await db.execute(
+        select(Client).where(
+            (Client.curp == pending.curp) | (Client.email == pending.email)
+        )
+    )
+    if dup.scalars().first():
+        pending.status = "expired"
+        await db.commit()
+        return HTMLResponse(render_token_expired_page(), status_code=409)
+
+    new_client = Client(
+        nombre_completo     = pending.nombre_completo,
+        curp                = pending.curp,
+        clave_de_elector    = pending.clave_de_elector,
+        fecha_nacimiento    = pending.fecha_nacimiento,
+        domicilio           = pending.domicilio,
+        email               = pending.email,
+        phone               = pending.phone,
+        front_submission_id = pending.front_submission_id,
+        back_submission_id  = pending.back_submission_id,
+        event_id            = pending.event_id,
+        registered_by       = pending.registered_by,
+        registered_at       = pending.registered_at,
+    )
+    db.add(new_client)
+    pending.status = "confirmed"
+    await db.commit()
+
+    return HTMLResponse(render_client_activated_page(pending.nombre_completo))
 
 
 @router.get("/")

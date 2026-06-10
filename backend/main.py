@@ -38,12 +38,15 @@ from models.payment_event               import PaymentEvent                     
 from models.payment_item                import PaymentItem                            # noqa
 from models.manual_status_change        import ManualStatusChange                     # noqa
 from models.client_transfer_log         import ClientTransferLog                      # noqa
+from models.unconfirmed_client          import UnconfirmedClient                       # noqa
+from models.payment_confirmation_token  import PaymentConfirmationToken               # noqa
 
 from routers import events, submissions, clients, delivery_confirmations, motorcycles, reservations, sales, registrar
 from routers.auth import router as auth_router
 from routers.declare_payment import router as declare_payment_router
 from routers.inventory_management import router as inventory_management_router
 from routers.vendor_sales import router as vendor_sales_router
+from routers.payment_confirmation import router as payment_confirmation_router
 from services.scheduler import start_scheduler, stop_scheduler
 
 
@@ -83,6 +86,7 @@ app.include_router(registrar.router)
 app.include_router(declare_payment_router)
 app.include_router(inventory_management_router)
 app.include_router(vendor_sales_router)
+app.include_router(payment_confirmation_router)
 
 
 @app.get("/")
