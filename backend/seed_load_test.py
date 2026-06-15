@@ -3,7 +3,7 @@ import os
 import asyncio
 import random
 import string
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -17,6 +17,7 @@ from models.credit_institution import CreditInstitution
 from models.color import Color
 from models.dealership import Dealership
 from models.event import Event, EventName, EventStatus, SlotName
+from models.manual_status_change import ManualStatusChange
 from models.motorcycle import Motorcycle, MotorcycleStatus
 from models.motorcycle_catalog import MotorcycleCatalog
 from models.payment_event import PaymentEvent
@@ -26,6 +27,7 @@ from models.reservation import Reservation, ReservationStatus
 from models.reservation_color import ReservationColor
 from models.sale import Sale, SaleStatus
 from models.submission import Submission, SubmissionStatus
+from models.user import User
 
 # ======================================================================== #
 # Constants                                                                  #
@@ -59,6 +61,23 @@ CLIENTS_DATA = [
     ("Patricia Romero Aguilar",    "ROAP920445WX2", "55234567801", "patricia.romero@gmail.com"),
     ("Alejandro Cruz Perez",       "CUPA870918YZ3", "55345678012", "alejandro.cruz@gmail.com"),
     ("Isabella Jimenez Salinas",   "JISI940307AB4", "55456780123", "isabella.jimenez@gmail.com"),
+]
+
+# Three vendors per dealership, ordered to match [vm_id, iz_id, tlp_id].
+VENDOR_NAMES_BY_DEALERSHIP = [
+    ["Sergio Beltran Ramos",  "Diana Lozano Vega",     "Raul Espinoza Mora"],      # BAJAJ VIA MORELOS
+    ["Andrea Salas Nieto",    "Hugo Martinez Pena",    "Claudia Rios Fuentes"],    # BAJAJ IGNACIO ZARAGOZA
+    ["Oscar Navarro Leon",    "Paola Cervantes Gil",   "Ivan Delgado Soto"],       # BAJAJ TLALPIZAHUAC
+]
+
+CANCEL_REASONS = [
+    "Cliente desistio de la compra",
+    "Pago no completado a tiempo",
+    "Cliente no localizable",
+    "Cambio de modelo solicitado",
+    "Financiamiento rechazado",
+    "Cliente encontro un mejor precio",
+    "Documentacion incompleta",
 ]
 
 _ALPHANUM = string.ascii_uppercase + string.digits
@@ -609,6 +628,236 @@ async def seed_verified_sales(db, vm_id, efectivo_method_id):
 
 
 # ======================================================================== #
+# Seed vendors (3 per dealership) for the owner dashboard                     #
+# ======================================================================== #
+
+async def seed_vendors(db, ordered_dealership_ids) -> dict:
+    """Create 3 `vendor`-role users per dealership.
+
+    Returns {dealership_id: [user_id, ...]}. Idempotent: reuses any vendor that
+    already exists (matched by email).
+    """
+    from services.auth import hash_password
+
+    vendors_by_dealership = {}
+    created = 0
+
+    for idx, did in enumerate(ordered_dealership_ids):
+        ids = []
+        for name in VENDOR_NAMES_BY_DEALERSHIP[idx]:
+            slug  = name.lower().replace(" ", ".")
+            email = f"{slug}@bajaj.com"
+
+            existing = (await db.execute(
+                select(User).where(User.email == email)
+            )).scalar_one_or_none()
+            if existing:
+                ids.append(existing.user_id)
+                continue
+
+            user = User(
+                name            = name,
+                email           = email,
+                username        = slug,
+                hashed_password = hash_password("test123"),
+                role            = "vendor",
+                dealership_id   = did,
+                is_active       = True,
+                created_by      = 2,
+            )
+            db.add(user)
+            await db.flush()
+            ids.append(user.user_id)
+            created += 1
+
+        vendors_by_dealership[did] = ids
+
+    await db.commit()
+    print(f"[OK] Inserted {created} vendors (3 per dealership)")
+    return vendors_by_dealership
+
+
+# ======================================================================== #
+# Seed owner-dashboard activity (sales, reservations, cancellations)         #
+# ======================================================================== #
+
+async def seed_dashboard_activity(
+    db, ordered_dealership_ids, vendors_by_dealership,
+    client_ids, catalog, color_name_to_id, efectivo_method_id,
+):
+    """Populate every owner-dashboard variable, per dealership, per vendor.
+
+    Generates, for each vendor, a spread of:
+      • complete  sales  → summary.sold        / vendor.sold
+      • open/verified    → summary.in_progress / vendor.in_progress
+      • reservations     → summary.reserved    / vendor.reservations
+      • sale_cancelled   → cancelled table     / vendor.cancelled
+        (with a motorcycle → "Venta Cancelada"; without → "Reserva")
+
+    All `created_at` values land inside the current calendar month so they fall
+    within the dashboard's default [first-of-month → today] window.
+    """
+    now = datetime.now()
+
+    def ts():
+        """Random naive datetime within the current month, up to `now`."""
+        return now - timedelta(
+            days    = random.randint(0, max(0, now.day - 1)),
+            hours   = random.randint(0, 23),
+            minutes = random.randint(0, 59),
+        )
+
+    totals = {"sold": 0, "in_progress": 0, "reserved": 0, "cancelled": 0}
+
+    for did in ordered_dealership_ids:
+        vendor_ids = vendors_by_dealership[did]
+
+        # Fresh pool of unsold units for this dealership.
+        moto_pool = (await db.execute(
+            select(Motorcycle)
+            .options(joinedload(Motorcycle.model))
+            .where(
+                Motorcycle.dealership_id == did,
+                Motorcycle.status == MotorcycleStatus.in_stock,
+            )
+        )).unique().scalars().all()
+        moto_pool = list(moto_pool)
+
+        def take_moto():
+            return moto_pool.pop() if moto_pool else None
+
+        for vendor_id in vendor_ids:
+            # ── Completed sales (sold) ───────────────────────────────────
+            for _ in range(random.randint(2, 4)):
+                moto = take_moto()
+                if not moto:
+                    break
+                total   = moto.model.full_price
+                created = ts()
+                db.add(Sale(
+                    motorcycle_id   = moto.motorcycle_id,
+                    client_id       = random.choice(client_ids),
+                    vendor_id       = vendor_id,
+                    dealership_id   = did,
+                    total_price     = total,
+                    amount_verified = total,
+                    status          = SaleStatus.complete.value,
+                    created_at      = created,
+                ))
+                moto.status = MotorcycleStatus.sold
+                totals["sold"] += 1
+
+            # ── Sales in progress (open / verified) ──────────────────────
+            for _ in range(random.randint(1, 3)):
+                moto = take_moto()
+                if not moto:
+                    break
+                total   = moto.model.full_price
+                created = ts()
+                status  = random.choice([SaleStatus.open.value, SaleStatus.verified.value])
+                db.add(Sale(
+                    motorcycle_id   = moto.motorcycle_id,
+                    client_id       = random.choice(client_ids),
+                    vendor_id       = vendor_id,
+                    dealership_id   = did,
+                    total_price     = total,
+                    amount_verified = round(total * 0.3, 2) if status == SaleStatus.verified.value else 0.0,
+                    status          = status,
+                    created_at      = created,
+                ))
+                moto.status = MotorcycleStatus.sale_in_progress
+                totals["in_progress"] += 1
+
+            # ── Live reservations (active / assigned) ────────────────────
+            for _ in range(random.randint(1, 3)):
+                entry    = random.choice(catalog)
+                created  = ts()
+                deposit  = round(random.uniform(2000.0, 8000.0), 2)
+                reservation = Reservation(
+                    client_id      = random.choice(client_ids),
+                    model_id       = entry["model_id"],
+                    dealership_id  = did,
+                    deposit_amount = deposit,
+                    status         = random.choice([ReservationStatus.active, ReservationStatus.assigned]),
+                    created_by     = vendor_id,
+                    event_id       = None,
+                    created_at     = created,
+                )
+                db.add(reservation)
+                await db.flush()
+
+                color_name = random.choice(VALID_COLORS[entry["canonical_name"]])
+                db.add(ReservationColor(
+                    reservation_id = reservation.reservation_id,
+                    color_id       = color_name_to_id[color_name],
+                    priority       = 1,
+                ))
+                totals["reserved"] += 1
+
+            # ── Cancelled sales (with a motorcycle → "Venta Cancelada") ──
+            for _ in range(random.randint(0, 2)):
+                moto = take_moto()
+                if not moto:
+                    break
+                created = ts()
+                sale = Sale(
+                    motorcycle_id   = moto.motorcycle_id,
+                    client_id       = random.choice(client_ids),
+                    vendor_id       = vendor_id,
+                    dealership_id   = did,
+                    total_price     = moto.model.full_price,
+                    amount_verified = 0.0,
+                    status          = SaleStatus.refunded.value,
+                    created_at      = created,
+                )
+                db.add(sale)
+                await db.flush()
+                db.add(ManualStatusChange(
+                    event_type    = "sale_cancelled",
+                    motorcycle_id = moto.motorcycle_id,
+                    sale_id       = sale.sale_id,
+                    reason        = random.choice(CANCEL_REASONS),
+                    performed_by  = vendor_id,
+                    created_at    = created,
+                ))
+                moto.status = MotorcycleStatus.in_stock  # released back to stock
+                totals["cancelled"] += 1
+
+            # ── Cancelled reservation (no motorcycle → "Reserva") ────────
+            if random.random() < 0.6:
+                entry   = random.choice(catalog)
+                created = ts()
+                sale = Sale(
+                    motorcycle_id   = None,
+                    client_id       = random.choice(client_ids),
+                    vendor_id       = vendor_id,
+                    dealership_id   = did,
+                    total_price     = entry["full_price"],
+                    amount_verified = 0.0,
+                    status          = SaleStatus.refunded.value,
+                    created_at      = created,
+                )
+                db.add(sale)
+                await db.flush()
+                db.add(ManualStatusChange(
+                    event_type   = "sale_cancelled",
+                    sale_id      = sale.sale_id,
+                    reason       = random.choice(CANCEL_REASONS),
+                    performed_by = vendor_id,
+                    created_at   = created,
+                ))
+                totals["cancelled"] += 1
+
+        await db.commit()
+
+    print(
+        "[OK] Dashboard activity: "
+        f"{totals['sold']} sold, {totals['in_progress']} in progress, "
+        f"{totals['reserved']} reservations, {totals['cancelled']} cancellations"
+    )
+
+
+# ======================================================================== #
 # Entry point                                                                #
 # ======================================================================== #
 
@@ -628,6 +877,14 @@ async def seed_load_test():
 
         # ── Verified sales for contract testing ──────────────────────────────────
         await seed_verified_sales(db, vm_id, efectivo_method_id)
+
+        # ── Owner-dashboard data: vendors + per-vendor activity per dealership ────
+        ordered_dealership_ids = [vm_id, iz_id, tlp_id]
+        vendors_by_dealership  = await seed_vendors(db, ordered_dealership_ids)
+        await seed_dashboard_activity(
+            db, ordered_dealership_ids, vendors_by_dealership,
+            client_ids, catalog, color_name_to_id, efectivo_method_id,
+        )
 
         print()
 

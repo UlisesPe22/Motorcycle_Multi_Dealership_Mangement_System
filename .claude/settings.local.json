@@ -20,7 +20,8 @@
       "PowerShell(cd C:\\\\Users\\\\perez\\\\Documents\\\\moto_app\\\\backend; $env:PYTHONIOENCODING = \"utf-8\"; python seed.py 2>&1)",
       "Bash(xargs -I {} basename {})",
       "Bash(python -c \"import ast; ast.parse\\(open\\('routers/owner_dashboard.py'\\).read\\(\\)\\); print\\('owner_dashboard.py: syntax OK'\\)\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('seed_dashboard_test.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('seed_dashboard_test.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(python -m py_compile seed_load_test.py)"
     ]
   }
 }
