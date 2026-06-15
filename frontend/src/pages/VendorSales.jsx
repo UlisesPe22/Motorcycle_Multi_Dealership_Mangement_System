@@ -3,14 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '../api'
 import { fmt } from '../utils'
 import Toast from '../components/Toast'
-
-// ─── Palette ────────────────────────────────────────────────────────────────
-const BLUE   = '#1A73E8'
-const GREEN  = '#1E8E3E'
-const ORANGE = '#E37400'
-const GREY   = '#5F6368'
-const LIGHT  = '#F8F9FA'
-const BORDER = '#E0E0E0'
+import { BLUE, GREEN, ORANGE, GREY, LIGHT, BORDER } from '../constants'
 
 // ─── Skeleton block ──────────────────────────────────────────────────────────
 function Skeleton({ width = '100%', height = 16, style = {} }) {

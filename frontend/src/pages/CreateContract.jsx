@@ -2,13 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../api'
 import { fmt } from '../utils'
-
-// ─── Palette (matches VendorSales) ──────────────────────────────────────────
-const BLUE   = '#1A73E8'
-const GREEN  = '#1E8E3E'
-const GREY   = '#5F6368'
-const BORDER = '#E0E0E0'
-const LIGHT  = '#F8F9FA'
+import { BLUE, GREEN, GREY, BORDER, LIGHT } from '../constants'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 async function downloadDoc(url, filename) {
