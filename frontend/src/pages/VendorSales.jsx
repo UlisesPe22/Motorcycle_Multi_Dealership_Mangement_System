@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '../api'
 import { fmt } from '../utils'
 import Toast from '../components/Toast'
+import VendorHeaderCard from '../components/VendorHeaderCard'
 import { BLUE, GREEN, ORANGE, GREY, LIGHT, BORDER } from '../constants'
 
 // ─── Skeleton block ──────────────────────────────────────────────────────────
@@ -177,71 +178,12 @@ export default function VendorSales() {
       <div style={{ padding: '24px 28px', maxWidth: 1100, margin: '0 auto' }}>
 
         {/* ── Header card ──────────────────────────────────────────────────── */}
-        <div style={{
-          background: '#fff',
-          borderRadius: 8,
-          boxShadow: '0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08)',
-          padding: '20px 24px',
-          marginBottom: 24,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-            <span style={{ fontSize: 22 }}>👤</span>
-            <span style={{ fontSize: 18, fontWeight: 700, color: '#202124' }}>
-              {loading || !summary ? <Skeleton width={120} height={20} /> : summary.vendor_name}
-            </span>
-            <span style={{ marginLeft: 'auto', fontSize: 18, fontWeight: 600, color: GREY }}>
-              Mis Ventas
-            </span>
-          </div>
-
-          <div style={{ borderBottom: `1px solid ${BORDER}`, margin: '14px 0' }} />
-
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            {/* KPI: Ventas Activas */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              background: '#E8F0FE',
-              border: `1px solid #C5D8FB`,
-              borderRadius: 20,
-              padding: '6px 16px',
-            }}>
-              {loading || !summary ? (
-                <Skeleton width={80} height={16} />
-              ) : (
-                <>
-                  <span style={{ fontSize: 16, fontWeight: 700, color: BLUE }}>
-                    {summary.sales_in_progress}
-                  </span>
-                  <span style={{ fontSize: 13, color: BLUE }}>Ventas Activas</span>
-                </>
-              )}
-            </div>
-
-            {/* KPI: Completadas este mes */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              background: '#E6F4EA',
-              border: `1px solid #CEEAD6`,
-              borderRadius: 20,
-              padding: '6px 16px',
-            }}>
-              {loading || !summary ? (
-                <Skeleton width={110} height={16} />
-              ) : (
-                <>
-                  <span style={{ fontSize: 16, fontWeight: 700, color: GREEN }}>
-                    {summary.completed_this_month}
-                  </span>
-                  <span style={{ fontSize: 13, color: GREEN }}>Completadas este mes</span>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
+        <VendorHeaderCard
+          summary={summary}
+          loading={loading}
+          title="Mis Ventas"
+          showKpis={true}
+        />
 
         {/* ── Search bar ───────────────────────────────────────────────────── */}
         <div style={{

@@ -1,13 +1,14 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, extract
+from sqlalchemy import select, func, extract, nullslast
 from sqlalchemy.orm import joinedload, selectinload
 
 from database import get_db
 from config import HARDCODED_USER_ID
+from models.contract import Contract
 from models.motorcycle import Motorcycle
 from models.payment_confirmation_token import PaymentConfirmationToken
 from models.payment_event import PaymentEvent
@@ -196,5 +197,68 @@ async def vendor_sales_active(
                 continue
 
         output.append(row)
+
+    return output
+
+
+@router.get("/completed")
+async def vendor_sales_completed(
+    date_from: Optional[str] = Query(None),
+    date_to:   Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    # LEFT JOIN the matching contract (sale may not have one yet) so we can
+    # surface its generation date alongside each completed sale.
+    query = (
+        select(Sale, Contract.created_at)
+        .outerjoin(
+            Contract,
+            (Contract.employee_id == Sale.vendor_id)
+            & (Contract.motorcycle_id == Sale.motorcycle_id),
+        )
+        .options(
+            joinedload(Sale.client),
+            joinedload(Sale.motorcycle).joinedload(Motorcycle.model),
+        )
+        .where(
+            Sale.vendor_id == HARDCODED_USER_ID,
+            Sale.status == SaleStatus.complete.value,
+        )
+    )
+
+    # Optional contract-date range filter (inclusive of the full last day).
+    if date_from:
+        query = query.where(
+            Contract.created_at >= datetime.strptime(date_from, "%Y-%m-%d")
+        )
+    if date_to:
+        query = query.where(
+            Contract.created_at
+            <= datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
+        )
+
+    query = query.order_by(nullslast(Contract.created_at.desc()))
+
+    result = await db.execute(query)
+    rows = result.unique().all()
+
+    output = []
+    for sale, contract_date in rows:
+        model_name = None
+        year       = None
+        if sale.motorcycle and sale.motorcycle.model:
+            model_name = sale.motorcycle.model.canonical_name
+            year       = sale.motorcycle.model.year
+
+        client_name = sale.client.nombre_completo if sale.client else "—"
+
+        output.append({
+            "sale_id":       sale.sale_id,
+            "model_name":    model_name or "—",
+            "year":          year or "—",
+            "client_name":   client_name,
+            "total_price":   sale.total_price,
+            "contract_date": contract_date.strftime("%d/%m/%Y") if contract_date else None,
+        })
 
     return output

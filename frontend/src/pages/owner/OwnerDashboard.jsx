@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import api from '../../api'
+import DateFilter from '../../components/DateFilter'
 import { BLUE, GREEN, ORANGE, GREY, LIGHT, BORDER, RED } from '../../constants'
 
 // ─── Date helpers ────────────────────────────────────────────────────────────
@@ -179,18 +180,13 @@ export default function OwnerDashboard() {
       </div>
 
       {/* ── Filter bar ─────────────────────────────────────────────────────── */}
-      <div
-        style={{
-          background: '#fff',
-          borderRadius: 8,
-          boxShadow: '0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08)',
-          padding: '14px 16px',
-          marginBottom: 12,
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'flex-end',
-          gap: 14,
-        }}
+      <DateFilter
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        onDateFromChange={setDateFrom}
+        onDateToChange={setDateTo}
+        onApply={fetchData}
+        loading={loading}
       >
         <Field label="Sucursal">
           <select
@@ -204,33 +200,7 @@ export default function OwnerDashboard() {
             ))}
           </select>
         </Field>
-
-        <Field label="Desde">
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={inputStyle} />
-        </Field>
-
-        <Field label="Hasta">
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={inputStyle} />
-        </Field>
-
-        <button
-          onClick={fetchData}
-          disabled={loading}
-          style={{
-            padding: '8px 22px',
-            background: BLUE,
-            color: '#fff',
-            border: 'none',
-            borderRadius: 4,
-            fontSize: 14,
-            fontWeight: 500,
-            cursor: loading ? 'not-allowed' : 'pointer',
-            opacity: loading ? 0.7 : 1,
-          }}
-        >
-          Aplicar
-        </button>
-      </div>
+      </DateFilter>
 
       {/* ── Error banner ───────────────────────────────────────────────────── */}
       {error && (

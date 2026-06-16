@@ -2,7 +2,7 @@ import { getUser } from '../store/auth'
 
 const INTERFACES = [
   { role: 'manager', label: 'Interfaz Gerente',  icon: '⚙', path: '/' },
-  { role: 'vendor',  label: 'Interfaz Vendedor', icon: '◇', path: '/declarar-pago' },
+  { role: 'vendor',  label: 'Interfaz Vendedor', icon: '◇', path: '/mis-ventas' },
   { role: 'owner',   label: 'Interfaz Administrador',    icon: '⊞', path: '/dashboard' },
   { role: 'master',  label: 'Panel Master',       icon: '★', path: '/master' },
 ]

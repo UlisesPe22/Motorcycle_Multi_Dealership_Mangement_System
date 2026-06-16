@@ -21,7 +21,10 @@
       "Bash(xargs -I {} basename {})",
       "Bash(python -c \"import ast; ast.parse\\(open\\('routers/owner_dashboard.py'\\).read\\(\\)\\); print\\('owner_dashboard.py: syntax OK'\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('seed_dashboard_test.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
-      "Bash(python -m py_compile seed_load_test.py)"
+      "Bash(python -m py_compile seed_load_test.py)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8000/vendor-sales/summary)",
+      "Bash(curl -s 'http://localhost:8000/vendor-sales/completed?date_from=2026-01-01&date_to=2026-06-15')",
+      "Bash(curl -s 'http://localhost:8000/vendor-sales/completed?date_from=2026-06-16&date_to=2026-06-16')"
     ]
   }
 }
