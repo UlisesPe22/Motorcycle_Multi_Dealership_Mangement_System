@@ -7,8 +7,8 @@ import RegisterClient from '../pages/RegisterClient'
 import CreateContract from '../pages/CreateContract'
 
 export const VENDOR_NAV = [
-  { path: '/declarar-pago',     icon: '◇', label: 'Declarar Pago' },
   { path: '/mis-ventas',        icon: '◉', label: 'Mis Ventas' },
+  { path: '/declarar-pago',     icon: '◇', label: 'Declarar Pago' },
   { path: '/registrar-cliente', icon: '+', label: 'Registrar Cliente' },
 ]
 
@@ -20,7 +20,7 @@ export default function VendorLayout({ switcherProps }) {
         <Route path="/mis-ventas" element={<VendorSales />} />
         <Route path="/registrar-cliente" element={<RegisterClient />} />
         <Route path="/crear-contrato/:sale_id" element={<CreateContract />} />
-        <Route path="*" element={<Navigate to="/declarar-pago" replace />} />
+        <Route path="*" element={<Navigate to="/mis-ventas" replace />} />
       </Routes>
     </AppShell>
   )

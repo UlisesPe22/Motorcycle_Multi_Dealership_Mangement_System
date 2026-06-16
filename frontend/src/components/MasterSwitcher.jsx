@@ -3,7 +3,7 @@ import { getUser } from '../store/auth'
 const INTERFACES = [
   { role: 'manager', label: 'Interfaz Gerente',  icon: '⚙', path: '/' },
   { role: 'vendor',  label: 'Interfaz Vendedor', icon: '◇', path: '/declarar-pago' },
-  { role: 'owner',   label: 'Interfaz Dueño',    icon: '⊞', path: '/dashboard' },
+  { role: 'owner',   label: 'Interfaz Administrador',    icon: '⊞', path: '/dashboard' },
   { role: 'master',  label: 'Panel Master',       icon: '★', path: '/master' },
 ]
 

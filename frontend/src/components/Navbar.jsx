@@ -3,7 +3,7 @@ import { getUser, clearAuth, isAuthenticated } from '../store/auth'
 
 const ROLE_LABELS = {
   master:  'Master',
-  owner:   'Dueño',
+  owner:   'Adminstrador',
   manager: 'Gerente',
   vendor:  'Vendedor',
 }

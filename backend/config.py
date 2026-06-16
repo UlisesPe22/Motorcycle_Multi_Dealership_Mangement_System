@@ -1,5 +1,5 @@
-#MODEL_NAME = "gemini-3.1-flash-lite"
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "gemini-3.1-flash-lite"
+#MODEL_NAME = "gemini-2.5-flash"
 CONFIDENCE_THRESHOLD = 0.95
 
 MODELO_CODE_LENGTH = 12

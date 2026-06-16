@@ -13,14 +13,13 @@ import RegisterVendedor from '../pages/RegisterVendedor'
 import InventoryManagement from '../pages/InventoryManagement'
 import VendorSales from '../pages/VendorSales'
 import CreateContract from '../pages/CreateContract'
+import InventoryEvents from '../pages/InventoryEvents'
 
 export const MANAGER_NAV = [
   { path: '/',                     icon: '⊞', label: 'Panel Principal' },
   { path: '/registrar-cliente',    icon: '+', label: 'Registrar Cliente' },
-  { path: '/clientes',             icon: '○', label: 'Buscar Cliente' },
-  { path: '/orden-compra',         icon: '≡', label: 'Orden de Compra' },
-  { path: '/orden-traslado',       icon: '▷', label: 'Orden de Traslado' },
-  { path: '/registrar-entrega',    icon: '✔', label: 'Registrar Entrega' },
+// { path: '/clientes',             icon: '○', label: 'Buscar Cliente' },
+  { path: '/eventos-inventario',   icon: '≡', label: 'Eventos de Inventario' },
   { path: '/declarar-pago',        icon: '◇', label: 'Declarar Pago' },
   { path: '/modificar-inventario', icon: '✕', label: 'Modificar Inventario' },
   { path: '/registrar-empleado',   icon: '◈', label: 'Registrar Empleado' },
@@ -33,6 +32,7 @@ export default function ManagerLayout({ switcherProps }) {
         <Route path="/" element={<Dashboard />} />
         <Route path="/registrar-cliente" element={<RegisterClient />} />
         <Route path="/clientes" element={<ClientList />} />
+        <Route path="/eventos-inventario" element={<InventoryEvents />} />
         <Route path="/orden-compra" element={<PurchaseOrder />} />
         <Route path="/orden-traslado" element={<OrderConfirmation />} />
         <Route path="/registrar-entrega" element={<Delivery />} />

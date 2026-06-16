@@ -5,7 +5,7 @@ import OwnerDashboard from '../pages/owner/OwnerDashboard'
 import RegisterVendedor from '../pages/RegisterVendedor'
 
 export const OWNER_NAV = [
-  { path: '/dashboard',          icon: '⊞', label: 'Dashboard' },
+  { path: '/dashboard',          icon: '⊞', label: 'Panel Principal' },
   { path: '/registrar-empleado', icon: '◈', label: 'Registrar Gerente' },
 ]
 
