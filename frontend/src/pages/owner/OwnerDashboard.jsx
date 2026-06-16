@@ -172,7 +172,7 @@ export default function OwnerDashboard() {
         }}
       >
         <div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: '#202124' }}>Panel del Dueño</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: '#202124' }}>Panel Principal</div>
           <div style={{ fontSize: 13, color: GREY, marginTop: 4 }}>Resumen del periodo seleccionado</div>
         </div>
         {!isMobile && <BarChart data={chartData} isMobile={false} />}
@@ -192,7 +192,7 @@ export default function OwnerDashboard() {
           gap: 14,
         }}
       >
-        <Field label="Concesionario">
+        <Field label="Sucursal">
           <select
             value={selectedDealership}
             onChange={(e) => setSelectedDealership(Number(e.target.value))}
@@ -312,7 +312,7 @@ export default function OwnerDashboard() {
                     <th className="od-num">Vendidas</th>
                     <th className="od-num">Reservaciones</th>
                     <th className="od-num">Cancelaciones</th>
-                    <th className="od-num">En Progreso</th>
+                    <th className="od-num">Ventas En Progreso</th>
                   </tr>
                 </thead>
                 <tbody>

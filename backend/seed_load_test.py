@@ -167,7 +167,7 @@ async def seed_clients(db) -> list:
 
         event = Event(
             event_type   = EventName.client_registration.value,
-            initiated_by = 2,
+            initiated_by = 1,
             status       = EventStatus.complete,
             started_at   = datetime.now(timezone.utc).replace(tzinfo=None),
         )
@@ -199,7 +199,7 @@ async def seed_clients(db) -> list:
             front_submission_id = front_sub.submission_id,
             back_submission_id  = back_sub.submission_id,
             event_id            = event.event_id,
-            registered_by       = 2,
+            registered_by       = 1,
         )
         db.add(client)
         await db.flush()
@@ -325,7 +325,7 @@ async def seed_reservations(
             sale = Sale(
                 motorcycle_id   = moto_info["motorcycle_id"],
                 client_id       = client_id,
-                vendor_id       = 2,
+                vendor_id       = 1,
                 dealership_id   = did,
                 total_price     = total_price,
                 amount_verified = 0.0,
@@ -339,7 +339,7 @@ async def seed_reservations(
                 event_type      = "reservation",
                 status          = "pending",
                 expected_amount = deposit_amount,
-                created_by      = 2,
+                created_by      = 1,
             )
             db.add(payment_event)
             await db.flush()
@@ -440,7 +440,7 @@ async def seed_verified_sales(db, vm_id, efectivo_method_id):
             front_submission_id = front_sub.submission_id,
             back_submission_id  = back_sub.submission_id,
             event_id            = event.event_id,
-            registered_by       = 2,
+            registered_by       = 4,
         )
         db.add(client)
         await db.flush()
@@ -454,7 +454,7 @@ async def seed_verified_sales(db, vm_id, efectivo_method_id):
     sale1 = Sale(
         motorcycle_id   = moto1.motorcycle_id,
         client_id       = client1.client_id,
-        vendor_id       = 2,
+        vendor_id       = 1,
         dealership_id   = vm_id,
         total_price     = total1,
         amount_verified = total1,
@@ -469,7 +469,7 @@ async def seed_verified_sales(db, vm_id, efectivo_method_id):
         event_type      = "reservation",
         status          = "verified",
         expected_amount = 5000.0,
-        created_by      = 2,
+        created_by      = 1,
         created_at      = now,
     )
     db.add(ev1_res)
@@ -487,7 +487,7 @@ async def seed_verified_sales(db, vm_id, efectivo_method_id):
         event_type      = "al_contado",
         status          = "verified",
         expected_amount = total1 - 5000.0,
-        created_by      = 2,
+        created_by      = 1,
         created_at      = now,
     )
     db.add(ev1_cto)
@@ -510,7 +510,7 @@ async def seed_verified_sales(db, vm_id, efectivo_method_id):
     sale2 = Sale(
         motorcycle_id   = moto2.motorcycle_id,
         client_id       = client2.client_id,
-        vendor_id       = 2,
+        vendor_id       = 1,
         dealership_id   = vm_id,
         total_price     = total2,
         amount_verified = total2,
@@ -525,7 +525,7 @@ async def seed_verified_sales(db, vm_id, efectivo_method_id):
         event_type      = "reservation",
         status          = "verified",
         expected_amount = 3000.0,
-        created_by      = 2,
+        created_by      = 1,
         created_at      = now,
     )
     db.add(ev2_res)
@@ -543,7 +543,7 @@ async def seed_verified_sales(db, vm_id, efectivo_method_id):
         event_type      = "enganche",
         status          = "verified",
         expected_amount = 18000.0,
-        created_by      = 2,
+        created_by      = 1,
         created_at      = now,
     )
     db.add(ev2_eng)
@@ -569,7 +569,7 @@ async def seed_verified_sales(db, vm_id, efectivo_method_id):
         event_type      = "financing",
         status          = "verified",
         expected_amount = financing_amount2,
-        created_by      = 2,
+        created_by      = 1,
         created_at      = now,
     )
     db.add(ev2_fin)
@@ -593,7 +593,7 @@ async def seed_verified_sales(db, vm_id, efectivo_method_id):
     sale3 = Sale(
         motorcycle_id   = moto3.motorcycle_id,
         client_id       = client3.client_id,
-        vendor_id       = 2,
+        vendor_id       = 1,
         dealership_id   = vm_id,
         total_price     = total3,
         amount_verified = total3,
@@ -608,7 +608,7 @@ async def seed_verified_sales(db, vm_id, efectivo_method_id):
         event_type      = "al_contado",
         status          = "verified",
         expected_amount = total3,
-        created_by      = 2,
+        created_by      = 1,
         created_at      = now,
     )
     db.add(ev3_cto)
@@ -728,7 +728,7 @@ async def seed_dashboard_activity(
 
         for vendor_id in vendor_ids:
             # ── Completed sales (sold) ───────────────────────────────────
-            for _ in range(random.randint(2, 4)):
+            for _ in range(random.randint(3, 6)):
                 moto = take_moto()
                 if not moto:
                     break

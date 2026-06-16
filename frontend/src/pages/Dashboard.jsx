@@ -8,7 +8,6 @@ const STATUS_ES = {
   purchased:         'Comprada',
   incoming:          'En camino',
   in_stock:          'En stock',
-  not_purchased:     'No comprada',
   rejected:          'Rechazada',
   sold:              'Vendida',
   cancelled:         'Cancelada',

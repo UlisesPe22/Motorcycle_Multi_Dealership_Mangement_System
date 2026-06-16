@@ -28,7 +28,7 @@ SALE_LOCK_MINUTES = 2
 
 MAX_PAYMENT_ITEMS_PER_EVENT = 5
 
-HARDCODED_USER_ID = 2
+HARDCODED_USER_ID = 1
 
 # Auth
 SECRET_KEY        = "moto_app_secret_key_change_in_production"
