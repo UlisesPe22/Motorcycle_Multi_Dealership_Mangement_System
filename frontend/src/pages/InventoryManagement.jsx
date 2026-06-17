@@ -6,7 +6,7 @@ import StepIndicator from '../components/StepIndicator'
 import Toast from '../components/Toast'
 import { fmt } from '../utils'
 import RecordCard from './InventoryManagement/RecordCard'
-import ClientDropdown from './InventoryManagement/ClientDropdown'
+import SearchableSelect from '../components/SearchableSelect'
 import ActivitySelector from './InventoryManagement/ActivitySelector'
 
 const EMPTY_ACTIVITY = { sales: [], standalone_reservations: [], reservations: [] }
@@ -19,7 +19,6 @@ export default function InventoryManagement() {
   const [operationType, setOperationType] = useState(null)
 
   // ── Cancel flow ───────────────────────────────────────────────────────────
-  const [cancelClientFilter,   setCancelClientFilter]   = useState('')
   const [clientsWithActivity,  setClientsWithActivity]  = useState([])
   const [cancelClientId,       setCancelClientId]       = useState('')
   const [clientActivity,       setClientActivity]       = useState(EMPTY_ACTIVITY)
@@ -34,13 +33,11 @@ export default function InventoryManagement() {
   const [motoSearchError,   setMotoSearchError]   = useState('')
 
   // ── Transfer flow ─────────────────────────────────────────────────────────
-  const [transferOriginFilter,   setTransferOriginFilter]   = useState('')
   const [clientsWithSales,       setClientsWithSales]       = useState([])
   const [transferOriginId,       setTransferOriginId]       = useState('')
   const [transferOriginActivity, setTransferOriginActivity] = useState(EMPTY_ACTIVITY)
   const [transferOriginLoading,  setTransferOriginLoading]  = useState(false)
   const [transferRecord,         setTransferRecord]         = useState(null)
-  const [transferDestFilter,     setTransferDestFilter]     = useState('')
   const [allClients,             setAllClients]             = useState([])
   const [transferDestId,         setTransferDestId]         = useState('')
 
@@ -120,15 +117,8 @@ export default function InventoryManagement() {
       .reduce((sum, ev) => sum + (ev.items || []).reduce((s2, item) => s2 + item.amount, 0), 0)
   })()
 
-  // ── Filtered client lists ─────────────────────────────────────────────────
-  const filteredCancelClients = clientsWithActivity.filter(c =>
-    c.nombre_completo.toLowerCase().includes(cancelClientFilter.toLowerCase())
-  )
-  const filteredTransferOrigins = clientsWithSales.filter(c =>
-    c.nombre_completo.toLowerCase().includes(transferOriginFilter.toLowerCase())
-  )
-  const filteredTransferDests = allClients.filter(c =>
-    c.nombre_completo.toLowerCase().includes(transferDestFilter.toLowerCase()) &&
+  // ── Transfer destination candidates (exclude the origin client) ───────────
+  const transferDestOptions = allClients.filter(c =>
     String(c.client_id) !== String(transferOriginId)
   )
 
@@ -166,7 +156,6 @@ export default function InventoryManagement() {
   }
 
   function resetFlowData() {
-    setCancelClientFilter('')
     setCancelClientId('')
     setClientActivity(EMPTY_ACTIVITY)
     setSelectedRecord(null)
@@ -174,11 +163,9 @@ export default function InventoryManagement() {
     setSerieInput('')
     setMotoSearchResult(null)
     setMotoSearchError('')
-    setTransferOriginFilter('')
     setTransferOriginId('')
     setTransferOriginActivity(EMPTY_ACTIVITY)
     setTransferRecord(null)
-    setTransferDestFilter('')
     setTransferDestId('')
     setReason('')
   }
@@ -269,13 +256,14 @@ export default function InventoryManagement() {
                 <>
                   <div className="card-section">Cliente</div>
                   <div className="upload-label">Buscar cliente con actividad activa</div>
-                  <ClientDropdown
-                    filter={cancelClientFilter}
-                    setFilter={setCancelClientFilter}
-                    selectedId={cancelClientId}
-                    setSelectedId={id => { setCancelClientId(id); setSelectedRecord(null) }}
-                    options={filteredCancelClients}
-                    placeholder="Buscar por nombre..."
+                  <SearchableSelect
+                    options={clientsWithActivity}
+                    value={cancelClientId}
+                    onChange={id => { setCancelClientId(id); setSelectedRecord(null) }}
+                    labelKey="nombre_completo"
+                    subLabelKey="rfc"
+                    valueKey="client_id"
+                    placeholder="Buscar cliente por nombre o RFC..."
                   />
 
                   {cancelClientId && (
@@ -375,12 +363,13 @@ export default function InventoryManagement() {
                 <>
                   <div className="card-section">Cliente Origen</div>
                   <div className="upload-label">Buscar cliente con ventas o reservaciones</div>
-                  <ClientDropdown
-                    filter={transferOriginFilter}
-                    setFilter={setTransferOriginFilter}
-                    selectedId={transferOriginId}
-                    setSelectedId={id => { setTransferOriginId(id); setTransferRecord(null); setTransferDestId(''); setTransferDestFilter('') }}
-                    options={filteredTransferOrigins}
+                  <SearchableSelect
+                    options={clientsWithSales}
+                    value={transferOriginId}
+                    onChange={id => { setTransferOriginId(id); setTransferRecord(null); setTransferDestId('') }}
+                    labelKey="nombre_completo"
+                    subLabelKey="rfc"
+                    valueKey="client_id"
                     placeholder="Buscar cliente origen..."
                   />
 
@@ -392,7 +381,7 @@ export default function InventoryManagement() {
                         activity={transferOriginActivity}
                         loading={transferOriginLoading}
                         selectedRec={transferRecord}
-                        setSelectedRec={rec => { setTransferRecord(rec); setTransferDestId(''); setTransferDestFilter('') }}
+                        setSelectedRec={rec => { setTransferRecord(rec); setTransferDestId('') }}
                         mode='transfer'
                       />
                     </>
@@ -403,12 +392,13 @@ export default function InventoryManagement() {
                       <hr className="card-divider" />
                       <div className="card-section">Cliente Destino</div>
                       <div className="upload-label">Buscar el nuevo cliente al que se transferirán los datos</div>
-                      <ClientDropdown
-                        filter={transferDestFilter}
-                        setFilter={setTransferDestFilter}
-                        selectedId={transferDestId}
-                        setSelectedId={setTransferDestId}
-                        options={filteredTransferDests}
+                      <SearchableSelect
+                        options={transferDestOptions}
+                        value={transferDestId}
+                        onChange={setTransferDestId}
+                        labelKey="nombre_completo"
+                        subLabelKey="rfc"
+                        valueKey="client_id"
                         placeholder="Buscar cliente destino..."
                       />
                       {transferDestId && transferDestClient && (

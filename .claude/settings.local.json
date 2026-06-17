@@ -24,7 +24,8 @@
       "Bash(python -m py_compile seed_load_test.py)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8000/vendor-sales/summary)",
       "Bash(curl -s 'http://localhost:8000/vendor-sales/completed?date_from=2026-01-01&date_to=2026-06-15')",
-      "Bash(curl -s 'http://localhost:8000/vendor-sales/completed?date_from=2026-06-16&date_to=2026-06-16')"
+      "Bash(curl -s 'http://localhost:8000/vendor-sales/completed?date_from=2026-06-16&date_to=2026-06-16')",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:5173/)"
     ]
   }
 }

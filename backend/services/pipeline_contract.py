@@ -72,6 +72,14 @@ def replace_placeholders(doc: Document, replacements: dict) -> None:
                 for para in cell.paragraphs:
                     replace_in_paragraph(para)
 
+    for section in doc.sections:
+        if section.header:
+            for para in section.header.paragraphs:
+                replace_in_paragraph(para)
+        if section.footer:
+            for para in section.footer.paragraphs:
+                replace_in_paragraph(para)
+
 
 async def build_contract_replacements(contract, db: AsyncSession) -> dict:
     from models.motorcycle_model_code import MotorcycleModelCode

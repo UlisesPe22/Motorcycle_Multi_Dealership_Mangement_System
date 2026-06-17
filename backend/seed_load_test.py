@@ -748,7 +748,7 @@ async def seed_dashboard_activity(
                 totals["sold"] += 1
 
             # ── Sales in progress (open / verified) ──────────────────────
-            for _ in range(random.randint(1, 3)):
+            for _ in range(random.randint(1, 4)):
                 moto = take_moto()
                 if not moto:
                     break

@@ -276,7 +276,8 @@ async def seed_credit_institutions(db):
         return
 
     db.add_all([
-        CreditInstitution(name="ANM"),
+        CreditInstitution(name="Galgo"),
+        CreditInstitution(name="Banco Azteca"),
         CreditInstitution(name="Maxicash"),
     ])
     await db.commit()

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../api'
 import PageHeader from '../components/PageHeader'
+import SearchableSelect from '../components/SearchableSelect'
 import { SALE_LOCK_MINUTES } from '../constants'
 const MAX_ITEMS    = 5
 const MAX_COLORS   = 3
@@ -293,6 +294,15 @@ export default function DeclarePayment() {
   const selectedModel      = models.find(m => String(m.model_id) === modelId) ?? null
   const availableColors    = selectedModel?.colors ?? []
   const selectedMoto       = motorcycles.find(m => String(m.motorcycle_id) === motorcycleId) ?? null
+  const motorcyclesForSelect = motorcycles.map(m => ({
+    ...m,
+    display_label: `${m.model_name} — ${m.color} — $${fmt(m.price)}${m.status === 'in_stock_reserved' ? ' ⭐ Reservada' : ''}`,
+    display_sub: `Serie: ${m.reference_number || '—'}`,
+  }))
+  const modelsForSelect = models.map(m => ({
+    ...m,
+    display_label: `${m.canonical_name} — ${m.year}`,
+  }))
   const totalPrice         = selectedMoto?.price ?? selectedModel?.price ?? 0
   const paymentSum         = paymentItems.reduce((s, item) => s + (parseFloat(item.amount) || 0), 0)
   const financingAmount    = totalPrice - paymentSum - (selectedMoto?.reservation_deposit || 0)
@@ -482,14 +492,15 @@ export default function DeclarePayment() {
 
               <div className="card-section">Cliente</div>
               <div className="upload-label">Selecciona el cliente</div>
-              <select value={clientId} onChange={e => setClientId(e.target.value)}>
-                <option value="">Seleccionar cliente...</option>
-                {clients.map(c => (
-                  <option key={c.client_id} value={c.client_id}>
-                    {c.nombre_completo} — {c.rfc}
-                  </option>
-                ))}
-              </select>
+              <SearchableSelect
+                options={clients}
+                value={clientId}
+                onChange={val => setClientId(String(val))}
+                labelKey="nombre_completo"
+                subLabelKey="rfc"
+                valueKey="client_id"
+                placeholder="Buscar cliente por nombre o RFC..."
+              />
 
               {/* ── Reservación: model + colors ─────────────────────────── */}
               {paymentType === 'reservation' && (
@@ -497,14 +508,18 @@ export default function DeclarePayment() {
                   <hr className="card-divider" />
                   <div className="card-section">Modelo</div>
                   <div className="upload-label">Selecciona el modelo a reservar</div>
-                  <select value={modelId} onChange={e => { setModelId(e.target.value); setSelectedColors([]) }}>
-                    <option value="">Seleccionar modelo...</option>
-                    {models.map(m => (
-                      <option key={m.model_id} value={m.model_id}>
-                        {m.canonical_name} — {m.year}
-                      </option>
-                    ))}
-                  </select>
+                  <SearchableSelect
+                    key={modelId}
+                    options={modelsForSelect}
+                    value={modelId}
+                    onChange={val => {
+                      setModelId(String(val))
+                      setSelectedColors([])
+                    }}
+                    labelKey="display_label"
+                    valueKey="model_id"
+                    placeholder="Buscar modelo..."
+                  />
 
                   <hr className="card-divider" />
                   <div className="card-section">Colores de Preferencia</div>
@@ -549,19 +564,17 @@ export default function DeclarePayment() {
                     <div className="caption">No hay motocicletas disponibles para esta combinación.</div>
                   ) : (
                     <>
-                      <select
+                      <SearchableSelect
+                        key={motorcycleId}
+                        options={motorcyclesForSelect}
                         value={motorcycleId}
-                        onChange={e => handleMotoSelect(e.target.value)}
-                      >
-                        <option value="">Seleccionar motocicleta...</option>
-                        {motorcycles.map(m => (
-                          <option key={m.motorcycle_id} value={m.motorcycle_id}>
-                            {m.model_name} — {m.color} — Serie: {m.reference_number || '—'} — ${fmt(m.price)}
-                            {m.status === 'in_stock_reserved' ? ' ⭐ (Reservada)' : ''}
-                          </option>
-                        ))}
-                      </select>
-
+                        onChange={val => handleMotoSelect(String(val))}
+                        labelKey="display_label"
+                        subLabelKey="display_sub"
+                        valueKey="motorcycle_id"
+                        placeholder="Buscar motocicleta por modelo o serie..."
+                        disabled={motosLoading}
+                      />
                     </>
                   )}
                 </>
