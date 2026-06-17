@@ -48,9 +48,8 @@ export default function Login() {
       minHeight: '100vh', display: 'flex', alignItems: 'center',
       justifyContent: 'center', background: '#F8FAFC',
     }}>
-      <div style={{
-        background: '#fff', borderRadius: '0.75rem', padding: '2.5rem',
-        width: '100%', maxWidth: '400px',
+      <div className="login-card" style={{
+        background: '#fff', borderRadius: '0.75rem',
         boxShadow: '0 4px 24px rgba(0,0,0,0.08)',
       }}>
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>

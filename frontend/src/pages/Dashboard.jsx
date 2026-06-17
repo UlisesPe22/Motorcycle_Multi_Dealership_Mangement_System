@@ -186,7 +186,7 @@ export default function Dashboard() {
             Mostrando {start + 1}–{end} de {total} motocicleta(s)
           </div>
 
-          <div className="inventory-table-wrapper">
+          <div className="inventory-table-wrapper table-scroll-wrapper">
             <table className="inventory-table">
               <thead>
                 <tr>

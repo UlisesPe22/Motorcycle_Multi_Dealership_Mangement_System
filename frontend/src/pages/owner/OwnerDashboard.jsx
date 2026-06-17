@@ -240,7 +240,7 @@ export default function OwnerDashboard() {
         <>
           {/* ── Cancelled sales ──────────────────────────────────────────── */}
           <SectionCard title="Cancelaciones">
-            <div style={{ overflowX: 'auto' }}>
+            <div className="table-scroll-wrapper" style={{ overflowX: 'auto' }}>
               <table className="od-table" style={{ minWidth: 520 }}>
                 <thead>
                   <tr>
@@ -274,7 +274,7 @@ export default function OwnerDashboard() {
 
           {/* ── Vendors ──────────────────────────────────────────────────── */}
           <SectionCard title="Vendedores">
-            <div style={{ overflowX: 'auto' }}>
+            <div className="table-scroll-wrapper" style={{ overflowX: 'auto' }}>
               <table className="od-table" style={{ minWidth: 480 }}>
                 <thead>
                   <tr>

@@ -229,7 +229,7 @@ export default function VendorSales() {
         </div>
 
         {/* ── Table card ───────────────────────────────────────────────────── */}
-        <div style={{
+        <div className="table-scroll-wrapper" style={{
           background: '#fff',
           borderRadius: 8,
           boxShadow: '0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08)',

@@ -66,6 +66,7 @@ export default function DateFilter({
       </Field>
 
       <button
+        className="date-filter-apply"
         onClick={onApply}
         disabled={loading}
         style={{

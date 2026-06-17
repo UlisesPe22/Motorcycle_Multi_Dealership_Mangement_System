@@ -8,12 +8,13 @@ const ROLE_LABELS = {
   vendor:  'Vendedor',
 }
 
-export default function Navbar({ navItems = [] }) {
+export default function Navbar({ navItems = [], onNavClick = () => {} }) {
   const location = useLocation()
   const navigate = useNavigate()
   const user = getUser()
 
   function handleLogout() {
+    onNavClick()
     clearAuth()
     navigate('/login')
   }
@@ -37,7 +38,7 @@ export default function Navbar({ navItems = [] }) {
           <button
             key={path}
             className="sidebar-nav-item"
-            onClick={() => navigate(path)}
+            onClick={() => { navigate(path); onNavClick() }}
           >
             {icon}&nbsp;&nbsp;{label}
           </button>
