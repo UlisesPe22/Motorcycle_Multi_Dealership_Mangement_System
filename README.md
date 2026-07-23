@@ -56,7 +56,7 @@ The distributor sends an email with a PDF where we get the motorcycles series nu
 
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/in_transit_document"/>
+<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/in_transit_document.png"/>
 
 </div>
 
