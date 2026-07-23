@@ -25,7 +25,7 @@ The system was initially developed with synchronous endpoints and later fully mi
 
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/user_tests" width="500"/>
+<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/user_tests"/>
 
 </div>
 
