@@ -22,9 +22,10 @@ endpoints. The backend logic is written in ![Python](https://img.shields.io/badg
 
 # Performance Test
 The system was initially developed with synchronous endpoints and later fully migrated to asynchronous programming. Load tests conducted with Locust demonstrated a significant reduction in response time and a measurable increase in concurrent user capacity under the same hardware conditions.
+
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/user_tests.png" width="500"/>
+<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/user_tests" width="500"/>
 
 </div>
 
