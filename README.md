@@ -9,17 +9,6 @@ The business operations produce sevral artifacts of unstructred data such as PDF
 **All piplines that extract data out of unstructured documents follow roughly this logic**
 ![Data Extraction Process](https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/data_extraction_process)
 
-
-## Data Extraction of National Identity Documents with Gemini 3.1 lite
-The aim of this module is to extract the necessary information out of Mexican National ID. We collect the information we need to create a future sale contract. This method improves teh company current approach since the sale personel manually fills all information into a contract. The latter is time consuming and produces multiple typing erros.
-<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/ID_template" width="600"/>
-
-### Phase 1 -- Document detection and corner extraction 
-The first phase main goal capturing the spatial points that make the four corners of the ID card rectangle and validating the data; this process produces one Gemini call per side. Each call returns the four corner coordinates of the card within the image and validate the image is an actual ID and not just the image of a puppy.
-
-### Phase 2 -- Field extraction 
-Each side is processed by a different prompt. Gemini receives the original  image alongside the corner coordinates related to the image and is asked to extract specific infomation.
-
 ## Data Processing for Automatic Inventory Mangement
 Currenlty the company mantains many versions of the inventory manually in excel sheets. This is extremly time consuming and causes many economical problemns since teh owner is never able to know the current stock of motorcycles or if the motorcycles she ordered, actully got delivered. This software provides a solution to have a unified inventory that is easy to mantain and reliable. The Dashboard looks like this:
 ![Dashboard](https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/dashboard.png)
@@ -43,3 +32,12 @@ From this document, we match the motorcycles that were captured in the first doc
 This event produces a differetn artifact that we analyse. Is a scanned picutre that has the infomration of the motorcycles that arrived. We match this information with the motorcycles marked as "incoming" and if the series numbers concide, then the motorcycle transtiosn to "in_stock". 
 ![Delivery Document](https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/delivery_document)
 
+## Data Extraction of National Identity Documents with Gemini 3.1 lite
+The aim of this module is to extract the necessary information out of Mexican National ID. We collect the information we need to create a future sale contract. This method improves teh company current approach since the sale personel manually fills all information into a contract. The latter is time consuming and produces multiple typing erros.
+<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/ID_template" width="600"/>
+
+### Phase 1 -- Document detection and corner extraction 
+The first phase main goal capturing the spatial points that make the four corners of the ID card rectangle and validating the data; this process produces one Gemini call per side. Each call returns the four corner coordinates of the card within the image and validate the image is an actual ID and not just the image of a puppy.
+
+### Phase 2 -- Field extraction 
+Each side is processed by a different prompt. Gemini receives the original  image alongside the corner coordinates related to the image and is asked to extract specific infomation.
