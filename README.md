@@ -12,8 +12,8 @@ The business operations produce sevral artifacts of unstructred data such as PDF
 
 ## Data Extraction of National Identity Documents with Gemini 3.1 lite
 The aim of this module is to extract the necessary information out of Mexican National ID. We collect the information we need to create a future sale contract. This method improves teh company current approach since the sale personel manually fills all information into a contract. The latter is time consuming and produces multiple typing erros.
-
 ![ID Template](https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/ID_template)
+
 
 ### Phase 1 -- Document detection and corner extraction 
 The first phase main goal capturing the spatial points that make the four corners of the ID card rectangle and validating the data; this process produces one Gemini call per side. Each call returns the four corner coordinates of the card within the image and validate the image is an actual ID and not just the image of a puppy.
@@ -23,6 +23,7 @@ Each side is processed by a different prompt. Gemini receives the original  imag
 
 ## Data Processing for Automatic Inventory Mangement
 Currenlty the company mantains many versions of the inventory manually in excel sheets. This is extremly time consuming and causes many economical problemns since teh owner is never able to know the current stock of motorcycles or if the motorcycles she ordered, actully got delivered. This software provides a solution to have a unified inventory that is easy to mantain and reliable. The Dashboard looks like this:
+![Dashboard](https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/dashboard.png)
 
 
 ### First document in the lifecycle which is produced when the owner buys any amount of motorcycles to the distributor.
@@ -35,7 +36,7 @@ Here we extract the distributor's codes which are known beforehand and the quant
 ### Second Event and second document. 
 The distributor sends an email with a PDF where we get the motorcycles series numbers and color. This document purpose is to notify that the motorcycles are in transit and will get arrive soon.
 
-![In Transit Notification](https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/in_transit_notification)
+![in _transit_document](https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/in_transit_document.png)
 
 From this document, we match the motorcycles that were captured in the first document and we asign color and series number to them, moreover, we transition it to a different status "incoming". 
 
