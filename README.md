@@ -12,8 +12,7 @@ The business operations produce sevral artifacts of unstructred data such as PDF
 
 ## Data Extraction of National Identity Documents with Gemini 3.1 lite
 The aim of this module is to extract the necessary information out of Mexican National ID. We collect the information we need to create a future sale contract. This method improves teh company current approach since the sale personel manually fills all information into a contract. The latter is time consuming and produces multiple typing erros.
-![ID Template](https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/ID_template)
-
+<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/ID_template" width="600"/>
 
 ### Phase 1 -- Document detection and corner extraction 
 The first phase main goal capturing the spatial points that make the four corners of the ID card rectangle and validating the data; this process produces one Gemini call per side. Each call returns the four corner coordinates of the card within the image and validate the image is an actual ID and not just the image of a puppy.
