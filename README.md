@@ -43,25 +43,42 @@ Currenlty the company mantains many versions of the inventory manually in excel 
 ### First document in the lifecycle which is produced when the owner buys any amount of motorcycles to the distributor.
 
 From this document I extract the PDF embedded text and since it may have changes in the order of the information, I use Gemini as a sophisitcated parser and i constrain its repsonse to only output text that is in the input text. Moreover I add a deterministic function to verfify the response. These measures make the probabilistic nature of LLMs not a risk for the process.
-![Purchase Document](https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/purchase_document)
 
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/purchase_document"/>
+
+</div>
 Here we extract the distributor's codes which are known beforehand and the quantity column. For every motorcycle purchase a new row is created in the inventory and the status of these new rows are "Purchased". 
 
 ### Second Event and second document. 
 The distributor sends an email with a PDF where we get the motorcycles series numbers and color. This document purpose is to notify that the motorcycles are in transit and will get arrive soon.
 
-![in _transit_document](https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/in_transit_document.png)
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/in_transit_document"/>
+
+</div>
 
 From this document, we match the motorcycles that were captured in the first document and we asign color and series number to them, moreover, we transition it to a different status "incoming". 
 
 ### Final Event -- Physical delivery 
 This event produces a differetn artifact that we analyse. Is a scanned picutre that has the infomration of the motorcycles that arrived. We match this information with the motorcycles marked as "incoming" and if the series numbers concide, then the motorcycle transtiosn to "in_stock". 
-![Delivery Document](https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/delivery_document)
+
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/delivery_document"/>
+
+</div>
 
 ## Data Extraction of National Identity Documents
 The aim of this module is to extract the necessary information out of Mexican National ID. We collect the information we need to create a future sale contract. This method improves teh company current approach since the sale personel manually fills all information into a contract. The latter is time consuming and produces multiple typing erros.
 
+<div align="center">
+
 <img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/ID_template" width="500"/>
+
+</div>
 
 ### Phase 1 -- Document detection and corner extraction 
 The first phase main goal capturing the spatial points that make the four corners of the ID card rectangle and validating the data; this process produces one Gemini call per side. Each call returns the four corner coordinates of the card within the image and validate the image is an actual ID and not just the image of a puppy.
