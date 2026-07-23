@@ -513,8 +513,8 @@ async def seed_verified_sales(db, vm_id, efectivo_method_id):
         vendor_id       = 1,
         dealership_id   = vm_id,
         total_price     = total2,
-        amount_verified = total2,
-        status          = SaleStatus.verified.value,
+        amount_verified = 3000.0 + 10000.0 + 8000.0,  # reservation + enganche only
+        status          = SaleStatus.open.value,  # financing still pending
         created_at      = now,
     )
     db.add(sale2)
@@ -728,7 +728,7 @@ async def seed_dashboard_activity(
 
         for vendor_id in vendor_ids:
             # ── Completed sales (sold) ───────────────────────────────────
-            for _ in range(random.randint(3, 6)):
+            for _ in range(random.randint(4, 8)):
                 moto = take_moto()
                 if not moto:
                     break
@@ -748,7 +748,7 @@ async def seed_dashboard_activity(
                 totals["sold"] += 1
 
             # ── Sales in progress (open / verified) ──────────────────────
-            for _ in range(random.randint(1, 4)):
+            for _ in range(random.randint(2, 5)):
                 moto = take_moto()
                 if not moto:
                     break
@@ -769,7 +769,7 @@ async def seed_dashboard_activity(
                 totals["in_progress"] += 1
 
             # ── Live reservations (active / assigned) ────────────────────
-            for _ in range(random.randint(1, 3)):
+            for _ in range(random.randint(2, 5)):
                 entry    = random.choice(catalog)
                 created  = ts()
                 deposit  = round(random.uniform(2000.0, 8000.0), 2)
@@ -795,7 +795,7 @@ async def seed_dashboard_activity(
                 totals["reserved"] += 1
 
             # ── Cancelled sales (with a motorcycle → "Venta Cancelada") ──
-            for _ in range(random.randint(0, 2)):
+            for _ in range(random.randint(2, 4)):
                 moto = take_moto()
                 if not moto:
                     break

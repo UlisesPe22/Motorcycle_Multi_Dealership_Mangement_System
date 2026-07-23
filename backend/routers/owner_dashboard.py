@@ -6,6 +6,7 @@ window (inclusive of both calendar days). They follow the same async-session
 pattern as vendor_sales.py and perform no auth check (matching that router).
 """
 from datetime import datetime, timedelta
+from math import ceil
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -89,9 +90,25 @@ async def owner_dashboard_cancelled(
     dealership_id: int = Query(...),
     date_from: Optional[str] = Query(default=None),
     date_to: Optional[str] = Query(default=None),
+    page: int = Query(default=1),
+    limit: int = Query(default=6),
     db: AsyncSession = Depends(get_db),
 ):
     start, end = _parse_range(date_from, date_to)
+    offset = (page - 1) * limit
+
+    total_count = await db.scalar(
+        select(func.count())
+        .select_from(ManualStatusChange)
+        .join(Sale, ManualStatusChange.sale_id == Sale.sale_id)
+        .join(User, Sale.vendor_id == User.user_id)
+        .where(
+            ManualStatusChange.event_type == _SALE_CANCELLED,
+            Sale.dealership_id == dealership_id,
+            ManualStatusChange.created_at >= start,
+            ManualStatusChange.created_at < end,
+        )
+    ) or 0
 
     result = await db.execute(
         select(ManualStatusChange, Sale, User)
@@ -104,9 +121,11 @@ async def owner_dashboard_cancelled(
             ManualStatusChange.created_at < end,
         )
         .order_by(ManualStatusChange.created_at.desc())
+        .offset(offset)
+        .limit(limit)
     )
 
-    return [
+    items = [
         {
             "sale_id":       sale.sale_id,
             "motorcycle_id": sale.motorcycle_id,
@@ -116,6 +135,14 @@ async def owner_dashboard_cancelled(
         }
         for msc, sale, user in result.all()
     ]
+
+    return {
+        "items":       items,
+        "total":       total_count,
+        "page":        page,
+        "limit":       limit,
+        "total_pages": ceil(total_count / limit) if limit else 1,
+    }
 
 
 @router.get("/vendors")

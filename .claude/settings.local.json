@@ -25,7 +25,8 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8000/vendor-sales/summary)",
       "Bash(curl -s 'http://localhost:8000/vendor-sales/completed?date_from=2026-01-01&date_to=2026-06-15')",
       "Bash(curl -s 'http://localhost:8000/vendor-sales/completed?date_from=2026-06-16&date_to=2026-06-16')",
-      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:5173/)"
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:5173/)",
+      "Bash(curl -s \"http://localhost:8000/owner-dashboard/cancelled?dealership_id=3&date_from=2020-01-01&date_to=2030-12-31&page=1&limit=8\")"
     ]
   }
 }

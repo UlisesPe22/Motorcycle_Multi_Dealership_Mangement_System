@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import api from '../../api'
 import DateFilter from '../../components/DateFilter'
 import { BLUE, GREEN, ORANGE, GREY, LIGHT, BORDER, RED } from '../../constants'
@@ -83,6 +83,8 @@ export default function OwnerDashboard() {
   const [dateTo, setDateTo]                         = useState(today)
   const [summary, setSummary]                       = useState(null)
   const [cancelled, setCancelled]                   = useState([])
+  const [cancelledPage, setCancelledPage]           = useState(1)
+  const [cancelledMeta, setCancelledMeta]           = useState({ total: 0, total_pages: 1 })
   const [vendors, setVendors]                       = useState([])
   const [loading, setLoading]                       = useState(true)
   const [error, setError]                           = useState(null)
@@ -109,21 +111,39 @@ export default function OwnerDashboard() {
     try {
       const [sumRes, cancRes, vendRes] = await Promise.all([
         api.get('/owner-dashboard/summary',   { params }),
-        api.get('/owner-dashboard/cancelled', { params }),
+        api.get('/owner-dashboard/cancelled', { params: { ...params, page: cancelledPage, limit: 6 } }),
         api.get('/owner-dashboard/vendors',   { params }),
       ])
       setSummary(sumRes.data)
-      setCancelled(cancRes.data)
+      setCancelled(cancRes.data.items)
+      setCancelledMeta({
+        total:       cancRes.data.total,
+        total_pages: cancRes.data.total_pages,
+      })
       setVendors(vendRes.data)
     } catch {
       setError('Error al cargar datos. Intenta de nuevo.')
     } finally {
       setLoading(false)
     }
-  }, [selectedDealership, dateFrom, dateTo])
+  }, [selectedDealership, dateFrom, dateTo, cancelledPage])
 
   // Auto-fetch on mount with defaults
   useEffect(() => { fetchData() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Refetch when the cancelled-table page changes (skip the initial mount)
+  const didMountPage = useRef(false)
+  useEffect(() => {
+    if (!didMountPage.current) { didMountPage.current = true; return }
+    fetchData()
+  }, [cancelledPage]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Aplicar always restarts at page 1; if already on page 1 fetch directly,
+  // otherwise resetting the page triggers the effect above.
+  const handleApply = useCallback(() => {
+    if (cancelledPage !== 1) setCancelledPage(1)
+    else fetchData()
+  }, [cancelledPage, fetchData])
 
   const chartData = [
     { label: 'Motos Vendidas',      value: summary?.sold ?? 0,        color: GREEN },
@@ -185,7 +205,7 @@ export default function OwnerDashboard() {
         dateTo={dateTo}
         onDateFromChange={setDateFrom}
         onDateToChange={setDateTo}
-        onApply={fetchData}
+        onApply={handleApply}
         loading={loading}
       >
         <Field label="Sucursal">
@@ -270,6 +290,58 @@ export default function OwnerDashboard() {
                 </tbody>
               </table>
             </div>
+
+            {cancelledMeta.total_pages > 1 && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '12px 16px',
+                borderTop: `1px solid ${BORDER}`,
+                fontSize: 13,
+                color: GREY,
+              }}>
+                <span>
+                  Mostrando {((cancelledPage - 1) * 6) + 1}–
+                  {Math.min(cancelledPage * 6, cancelledMeta.total)}
+                  {' '}de {cancelledMeta.total} registros
+                </span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => setCancelledPage((p) => p - 1)}
+                    disabled={cancelledPage === 1}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: 4,
+                      border: `1px solid ${BORDER}`,
+                      background: cancelledPage === 1 ? LIGHT : '#fff',
+                      color: cancelledPage === 1 ? GREY : BLUE,
+                      cursor: cancelledPage === 1 ? 'not-allowed' : 'pointer',
+                      fontSize: 13,
+                      fontWeight: 500,
+                    }}
+                  >
+                    ← Anterior
+                  </button>
+                  <button
+                    onClick={() => setCancelledPage((p) => p + 1)}
+                    disabled={cancelledPage >= cancelledMeta.total_pages}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: 4,
+                      border: `1px solid ${BORDER}`,
+                      background: cancelledPage >= cancelledMeta.total_pages ? LIGHT : '#fff',
+                      color: cancelledPage >= cancelledMeta.total_pages ? GREY : BLUE,
+                      cursor: cancelledPage >= cancelledMeta.total_pages ? 'not-allowed' : 'pointer',
+                      fontSize: 13,
+                      fontWeight: 500,
+                    }}
+                  >
+                    Siguiente →
+                  </button>
+                </div>
+              </div>
+            )}
           </SectionCard>
 
           {/* ── Vendors ──────────────────────────────────────────────────── */}
