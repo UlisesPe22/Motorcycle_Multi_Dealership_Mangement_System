@@ -7,9 +7,10 @@ The architectural design was built to run locally during development but thought
 
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/system_architecture" width="700"/>
+<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/system_architecture" width="500"/>
 
 </div>
+
 The system is separated into three main modules, each running inside its own Docker container controlled by Docker Compose. The user interacts with the frontend container via HTTP. The frontend is built with the ![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB) and compiled by ![Vite](https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white). The frontend communicates with the backend container using REST API architecture and sending requests to ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 endpoints. The backend logic is written in ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white). Some pipelines make requests to the Gemini API using an API key stored as an environment variable. The backend communicates with the ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white) database container through ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-D71F00?style=for-the-badge&logo=sqlalchemy&logoColor=white).
 
