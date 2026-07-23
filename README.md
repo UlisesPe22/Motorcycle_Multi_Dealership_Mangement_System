@@ -1,11 +1,12 @@
 # Overview
 This mangement system is grounded on a real-world collaboration with a motorcycle dealership group operating multiple retail locations in Mexico. The organization’s operations cover the full commercial lifecycle of a motorcycle. Starting by purchasing the motorcycles to a national distributor, followed by inventory management across multiple locations, to the final retail sale and commission settlement with sales personnel.
-**The mangment system is too large to cover it in a single readme file. Therefore, only the most significant functionalities will be detailed here
+**The mangment system is too large to cover it in a single readme file. Therefore, only the most significant functionalities will be detailed here**
 
 # Unstructured Data Processing for Inventory Mangement and Client Registration
 The business operations produce sevral artifacts of unstructred data such as PDFs or images. This section will explain how the analysis and extraction of dta from this artifacts produces valuable tools for business events.
 
 **All piplines that extract data out of unstructured documents follow roughly this logic**
+![Data Extraction Process](https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/data_extraction_process)
 
 
 ## Data Extraction of National Identity Documents with Gemini 3.1 lite
