@@ -5,18 +5,21 @@ This mangement system is grounded on a real-world collaboration with a motorcycl
 # System Architecture Design
 The architectural design was built to run locally during development but thought to easily migrate to a cloud deployment environment. For this reason, the system adopts containerization with ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white). 
 
-
 <div align="center">
 
 <img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/system_architecture" width="500"/>
 
 </div>
-
-
-
 The system is separated into three main modules, each running inside its own Docker container controlled by Docker Compose. The user interacts with the frontend container via HTTP. The frontend is built with the ![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB) and compiled by ![Vite](https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white). The frontend communicates with the backend container using REST API architecture and sending requests to ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 endpoints. The backend logic is written in ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white). Some pipelines make requests to the Gemini API using an API key stored as an environment variable. The backend communicates with the ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white) database container through ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-D71F00?style=for-the-badge&logo=sqlalchemy&logoColor=white).
 
+# Performance Test
+The system was initially developed with synchronous endpoints and later fully migrated to asynchronous programming. Load tests conducted with Locust demonstrated a significant reduction in response time and a measurable increase in concurrent user capacity under the same hardware conditions.
+<div align="center">
+
+<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/user_tests.png" width="500"/>
+
+</div>
 # Unstructured Data Processing for Inventory Mangement and Client Registration with ![Google Gemini](https://img.shields.io/badge/Google%20Gemini-8E75B2?style=for-the-badge&logo=googlegemini&logoColor=white)
 The business operations produce sevral artifacts of unstructred data such as PDFs or images. This section will explain how the analysis and extraction of dta from this artifacts produces valuable tools for business events.
 
@@ -47,7 +50,8 @@ This event produces a differetn artifact that we analyse. Is a scanned picutre t
 
 ## Data Extraction of National Identity Documents
 The aim of this module is to extract the necessary information out of Mexican National ID. We collect the information we need to create a future sale contract. This method improves teh company current approach since the sale personel manually fills all information into a contract. The latter is time consuming and produces multiple typing erros.
-<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/ID_template" width="600"/>
+
+<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/ID_template" width="500"/>
 
 ### Phase 1 -- Document detection and corner extraction 
 The first phase main goal capturing the spatial points that make the four corners of the ID card rectangle and validating the data; this process produces one Gemini call per side. Each call returns the four corner coordinates of the card within the image and validate the image is an actual ID and not just the image of a puppy.
