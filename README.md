@@ -6,7 +6,7 @@ This mangement system is grounded on a real-world collaboration with a motorcycl
 - [Unstructured Data Processing for Inventory Management and Client Registration](#unstructured-data-processing-for-inventory-mangement-and-client-registration-with-)
   - [Data Processing for Automatic Inventory Management](#data-processing-for-automatic-inventory-mangement)
   - [Data Extraction of National Identity Documents](#data-extraction-of-national-identity-documents)
-  - 
+
 **The mangment system is too large to cover it in a single readme file. Therefore, only the most significant functionalities will be detailed here.**
 # System Architecture Design
 The architectural design was built to run locally during development but thought to easily migrate to a cloud deployment environment. For this reason, the system adopts containerization with ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white). 
@@ -16,6 +16,7 @@ The architectural design was built to run locally during development but thought
 <img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/system_architecture" width="500"/>
 
 </div>
+
 The system is separated into three main modules, each running inside its own Docker container controlled by Docker Compose. The user interacts with the frontend container via HTTP. The frontend is built with the ![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB) and compiled by ![Vite](https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=vite&logoColor=white). The frontend communicates with the backend container using REST API architecture and sending requests to ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 endpoints. The backend logic is written in ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white). Some pipelines make requests to the Gemini API using an API key stored as an environment variable. The backend communicates with the ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white) database container through ![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-D71F00?style=for-the-badge&logo=sqlalchemy&logoColor=white).
 
