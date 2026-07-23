@@ -1,6 +1,12 @@
 # Overview
 This mangement system is grounded on a real-world collaboration with a motorcycle dealership group operating multiple retail locations in Mexico. The organization’s operations cover the full commercial lifecycle of a motorcycle. Starting by purchasing the motorcycles to a national distributor, followed by inventory management across multiple locations, to the final retail sale and commission settlement with sales personnel.
 
+- [System Architecture Design](#system-architecture-design)
+- [Performance Test](#performance-test)
+- [Unstructured Data Processing for Inventory Management and Client Registration](#unstructured-data-processing-for-inventory-mangement-and-client-registration-with-)
+  - [Data Processing for Automatic Inventory Management](#data-processing-for-automatic-inventory-mangement)
+  - [Data Extraction of National Identity Documents](#data-extraction-of-national-identity-documents)
+  - 
 **The mangment system is too large to cover it in a single readme file. Therefore, only the most significant functionalities will be detailed here.**
 # System Architecture Design
 The architectural design was built to run locally during development but thought to easily migrate to a cloud deployment environment. For this reason, the system adopts containerization with ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white). 
@@ -20,7 +26,9 @@ The system was initially developed with synchronous endpoints and later fully mi
 <img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/user_tests.png" width="500"/>
 
 </div>
+
 # Unstructured Data Processing for Inventory Mangement and Client Registration with ![Google Gemini](https://img.shields.io/badge/Google%20Gemini-8E75B2?style=for-the-badge&logo=googlegemini&logoColor=white)
+
 The business operations produce sevral artifacts of unstructred data such as PDFs or images. This section will explain how the analysis and extraction of dta from this artifacts produces valuable tools for business events.
 
 **All piplines that extract data out of unstructured documents follow roughly this logic**
