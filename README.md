@@ -3,7 +3,7 @@ This mangement system is grounded on a real-world collaboration with a motorcycl
 
 **The mangment system is too large to cover it in a single readme file. Therefore, only the most significant functionalities will be detailed here.**
 
-# Unstructured Data Processing for Inventory Mangement and Client Registration
+# Unstructured Data Processing for Inventory Mangement and Client Registration with Gemini 3.1 lite
 The business operations produce sevral artifacts of unstructred data such as PDFs or images. This section will explain how the analysis and extraction of dta from this artifacts produces valuable tools for business events.
 
 **All piplines that extract data out of unstructured documents follow roughly this logic**
@@ -31,7 +31,7 @@ From this document, we match the motorcycles that were captured in the first doc
 This event produces a differetn artifact that we analyse. Is a scanned picutre that has the infomration of the motorcycles that arrived. We match this information with the motorcycles marked as "incoming" and if the series numbers concide, then the motorcycle transtiosn to "in_stock". 
 ![Delivery Document](https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/delivery_document)
 
-## Data Extraction of National Identity Documents with Gemini 3.1 lite
+## Data Extraction of National Identity Documents
 The aim of this module is to extract the necessary information out of Mexican National ID. We collect the information we need to create a future sale contract. This method improves teh company current approach since the sale personel manually fills all information into a contract. The latter is time consuming and produces multiple typing erros.
 <img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/ID_template" width="600"/>
 
