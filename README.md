@@ -22,18 +22,24 @@ The first phase main goal capturing the spatial points that make the four corner
 Each side is processed by a different prompt. Gemini receives the original  image alongside the corner coordinates related to the image and is asked to extract specific infomation.
 
 ## Data Processing for Automatic Inventory Mangement
-Currenlty the company mantains many versions of the inventory manually in excel sheets. This is extremly time consuming and causes many economical problemns since teh owner is never able to know the current stock of motorcycles or if the motorcycles she ordered, actully got delivered. This software provides a solution to have a unified inventory that is easy to mantain and reliable.
+Currenlty the company mantains many versions of the inventory manually in excel sheets. This is extremly time consuming and causes many economical problemns since teh owner is never able to know the current stock of motorcycles or if the motorcycles she ordered, actully got delivered. This software provides a solution to have a unified inventory that is easy to mantain and reliable. The Dashboard looks like this:
+
 
 ### First document in the lifecycle which is produced when the owner buys any amount of motorcycles to the distributor.
 
 From this document I extract the PDF embedded text and since it may have changes in the order of the information, I use Gemini as a sophisitcated parser and i constrain its repsonse to only output text that is in the input text. Moreover I add a deterministic function to verfify the response. These measures make the probabilistic nature of LLMs not a risk for the process.
+![Purchase Document](https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/purchase_document)
 
 Here we extract the distributor's codes which are known beforehand and the quantity column. For every motorcycle purchase a new row is created in the inventory and the status of these new rows are "Purchased". 
 
 ### Second Event and second document. 
 The distributor sends an email with a PDF where we get the motorcycles series numbers and color. This document purpose is to notify that the motorcycles are in transit and will get arrive soon.
 
+![In Transit Notification](https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/in_transit_notification)
+
 From this document, we match the motorcycles that were captured in the first document and we asign color and series number to them, moreover, we transition it to a different status "incoming". 
 
 ### Final Event -- Physical delivery 
 This event produces a differetn artifact that we analyse. Is a scanned picutre that has the infomration of the motorcycles that arrived. We match this information with the motorcycles marked as "incoming" and if the series numbers concide, then the motorcycle transtiosn to "in_stock". 
+![Delivery Document](https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/delivery_document)
+
