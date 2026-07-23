@@ -13,7 +13,7 @@ The architectural design was built to run locally during development but thought
 
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/system_architecture" width="500"/>
+<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/system_architecture"/>
 
 </div>
 
