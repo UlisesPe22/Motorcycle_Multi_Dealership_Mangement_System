@@ -37,7 +37,7 @@ Currenlty the company mantains many versions of the inventory manually in excel 
 
 ### First document in the lifecycle which is produced when the owner buys any amount of motorcycles to the distributor.
 
-From this document I extract the PDF embedded text and since it may have changes in the order of the information, I use Gemini as a sophisitcated parser and i constrain its repsonse to only output text that is in the input text. Moreover I add a deterministic function to verfify the response. These measures make the probabilistic nature of LLMs not a risk for the process.
+From this document I extract the PDF embedded text and since it may have changes in the order of the information, I use Gemini as a sophisitcated parser and I constrain its repsonse to only output text that is in the input text. Moreover I add a deterministic function to verfify the response. These measures make the probabilistic nature of LLMs not a risk for Data Integrity.
 
 <div align="center">
 
@@ -47,7 +47,7 @@ From this document I extract the PDF embedded text and since it may have changes
 Here we extract the distributor's codes which are known beforehand and the quantity column. For every motorcycle purchase a new row is created in the inventory and the status of these new rows are "Purchased". 
 
 ### Second Event and second document. 
-The distributor sends an email with a PDF where we get the motorcycles series numbers and color. This document purpose is to notify that the motorcycles are in transit and will get arrive soon.
+The distributor sends an email with a PDF where we get the motorcycles series numbers and color after some time. This document purpose is to notify that the motorcycles are in transit and will get arrive soon.
 
 <div align="center">
 
@@ -58,7 +58,7 @@ The distributor sends an email with a PDF where we get the motorcycles series nu
 From this document, we match the motorcycles that were captured in the first document and we asign color and series number to them, moreover, we transition it to a different status "incoming". 
 
 ### Final Event -- Physical delivery 
-This event produces a differetn artifact that we analyse. Is a scanned picutre that has the infomration of the motorcycles that arrived. We match this information with the motorcycles marked as "incoming" and if the series numbers concide, then the motorcycle transtiosn to "in_stock". 
+This event produces a different artifact that we analyse. Is a scanned picutre that has the infomration of the motorcycles that arrived. We match this information with the motorcycles marked as "incoming" and if the series numbers concide, then the motorcycle transtiosn to "in_stock". 
 
 <div align="center">
 
@@ -67,7 +67,7 @@ This event produces a differetn artifact that we analyse. Is a scanned picutre t
 </div>
 
 # Overview of Additonal Functions (Full Stack Application)
-This software mangement tool covers multiple business functions and events. It is not possible to detail all here, nevertheless the next video is meant for the reader to see more details and functions of the system which covers all the Prodcut Lifecycle. All of this featrues are more web development oriented. 
+This software mangement tool covers multiple business functions and events. It is not possible to detail all here, nevertheless the next video is meant for the reader to see more details and functions of the system which covers all the Prodcut Lifecycle. All of this featrues are more web development oriented.
 
 ![Additional Functions Demo](photos_readme/additional_functions.gif)
 
