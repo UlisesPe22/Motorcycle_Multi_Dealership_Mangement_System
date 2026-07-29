@@ -6,7 +6,9 @@
   - [Data Processing for Automatic Inventory Management](#data-processing-for-automatic-inventory-mangement)
 - [Overview of Additional Functions (Full Stack Application)](#overview-of-additional-functions-full-stack-application))
 - [Performance Test](#performance-test)
+
 **The mangment system is too large to cover it in a single readme file. Therefore, only the most significant functionalities will be detailed here.**
+
 # System Architecture Design
 The architectural design was built to run locally during development but thought to easily migrate to a cloud deployment environment. For this reason, the system adopts containerization with ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white). 
 
