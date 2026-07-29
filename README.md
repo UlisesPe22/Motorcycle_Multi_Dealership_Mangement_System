@@ -72,7 +72,7 @@ This software mangement tool covers multiple business functions and events. It i
 ![Additional Functions Demo](photos_readme/additional_functions.gif)
 
 # Performance Test
-The system was initially developed with synchronous endpoints and later fully migrated to asynchronous programming. Load tests conducted with Locust demonstrated a significant reduction in response time and a measurable increase in concurrent user capacity under the same hardware conditions. The image below are teh results of the Async Version
+The system was initially developed with synchronous endpoints and later fully migrated to asynchronous programming. Load tests conducted with Locust demonstrated a significant reduction in response time and a measurable increase in concurrent user capacity under the same hardware conditions. The image below are teh results of the Async Version. On the left side we see a load test with 50 simultaneously active users and in the right side with 100 users.
 
 <div align="center">
 
