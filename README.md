@@ -31,14 +31,14 @@ The system was initially developed with synchronous endpoints and later fully mi
 
 # Unstructured Data Processing for Inventory Mangement and Client Registration with ![Google Gemini](https://img.shields.io/badge/Google%20Gemini-8E75B2?style=for-the-badge&logo=googlegemini&logoColor=white)
 
-The business operations produce sevral artifacts of unstructred data such as PDFs or images. This section will explain how the analysis and extraction of dta from this artifacts produces valuable tools for business events.
+The business operations produce sevral artifacts of unstructred data such as PDFs or images. This section will explain how the analysis and extraction of data from this artifacts produces an inventory mangement tool.
 
 **All piplines that extract data out of unstructured documents follow roughly this logic**
 ![Data Extraction Process](https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/data_extraction_process)
 
 ## Data Processing for Automatic Inventory Mangement
-Currenlty the company mantains many versions of the inventory manually in excel sheets. This is extremly time consuming and causes many economical problemns since teh owner is never able to know the current stock of motorcycles or if the motorcycles she ordered, actully got delivered. This software provides a solution to have a unified inventory that is easy to mantain and reliable. The Dashboard looks like this:
-<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/dashboard.png" width="1000"/>
+Currenlty the company mantains many versions of the inventory manually in excel sheets. This is extremly time consuming and causes many economical problemns since teh owner is never able to know the current stock of motorcycles or if the motorcycles she ordered, actully got delivered. This software provides a solution to have a unified inventory that is easy to mantain and reliable. The process will be summerized in the video and explained in the next paragraphs:
+<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/Inventory_process.mp4" width="1000"/>
 
 ### First document in the lifecycle which is produced when the owner buys any amount of motorcycles to the distributor.
 
