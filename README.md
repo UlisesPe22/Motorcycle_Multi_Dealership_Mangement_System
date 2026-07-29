@@ -5,7 +5,7 @@ This mangement system is grounded on a real-world collaboration with a motorcycl
 - [Performance Test](#performance-test)
 - [Unstructured Data Processing for Inventory Management and Client Registration](#unstructured-data-processing-for-inventory-mangement-and-client-registration-with-)
   - [Data Processing for Automatic Inventory Management](#data-processing-for-automatic-inventory-mangement)
-  - [Data Extraction of National Identity Documents](#data-extraction-of-national-identity-documents)
+- [Overview of Additional Functions (Full Stack Application)](#overview-of-additional-functions-full-stack-application))
 
 **The mangment system is too large to cover it in a single readme file. Therefore, only the most significant functionalities will be detailed here.**
 # System Architecture Design
@@ -72,17 +72,7 @@ This event produces a differetn artifact that we analyse. Is a scanned picutre t
 
 </div>
 
-## Data Extraction of National Identity Documents
-The aim of this module is to extract the necessary information out of Mexican National ID. We collect the information we need to create a future sale contract. This method improves teh company current approach since the sale personel manually fills all information into a contract. The latter is time consuming and produces multiple typing erros.
+# Overview of Additonal Functions (Full Stack Application)
+This software mangement tool covers multiple business functions and events. It is not possible to detail all here, nevertheless the next video is meant for the reader to see more details and functions of the system which covers all the Prodcut Lifecycle. All of this featrues are more web development oriented. 
 
-<div align="center">
-
-<img src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/ID_template" width="500"/>
-
-</div>
-
-### Phase 1 -- Document detection and corner extraction 
-The first phase main goal capturing the spatial points that make the four corners of the ID card rectangle and validating the data; this process produces one Gemini call per side. Each call returns the four corner coordinates of the card within the image and validate the image is an actual ID and not just the image of a puppy.
-
-### Phase 2 -- Field extraction 
-Each side is processed by a different prompt. Gemini receives the original  image alongside the corner coordinates related to the image and is asked to extract specific infomation.
+![Additional Functions Demo](photos_readme/additional_functions.gif)
