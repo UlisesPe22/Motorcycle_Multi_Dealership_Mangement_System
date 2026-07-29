@@ -39,9 +39,7 @@ The business operations produce sevral artifacts of unstructred data such as PDF
 ## Data Processing for Automatic Inventory Mangement
 Currenlty the company mantains many versions of the inventory manually in excel sheets. This is extremly time consuming and causes many economical problemns since teh owner is never able to know the current stock of motorcycles or if the motorcycles she ordered, actully got delivered. This software provides a solution to have a unified inventory that is easy to mantain and reliable. The process will be summerized in the video and explained in the next paragraphs:
 
-<div align="center">
-<video src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/Inventory_process.mp4" controls width="1000"></video>
-</div>
+[![Inventory Process Demo](photos_readme/thumbnail.png)](photos_readme/Inventory_process.mp4)
 
 ### First document in the lifecycle which is produced when the owner buys any amount of motorcycles to the distributor.
 
