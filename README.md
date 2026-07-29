@@ -27,7 +27,7 @@ endpoints. The backend logic is written in ![Python](https://img.shields.io/badg
 
 The business operations produce sevral artifacts of unstructred data such as PDFs or images. This section will explain how the analysis and extraction of data from this artifacts produces an inventory mangement tool.
 
-**All piplines that extract data out of unstructured documents follow roughly this logic**
+**All pipelines that extract data out of unstructured documents follow this logic**
 ![Data Extraction Process](https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/data_extraction_process)
 
 ## Data Processing for Automatic Inventory Mangement
