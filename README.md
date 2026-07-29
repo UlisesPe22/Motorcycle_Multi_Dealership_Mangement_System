@@ -42,7 +42,7 @@ Currenlty the company mantains many versions of the inventory manually in excel 
 <div align="center">
 <video src="https://raw.githubusercontent.com/UlisesPe22/Motorcycle_Multi_Dealership_Mangement_System/main/photos_readme/Inventory_process.mp4" width="1000" controls autoplay muted loop>
 </div>
-
+  
 ### First document in the lifecycle which is produced when the owner buys any amount of motorcycles to the distributor.
 
 From this document I extract the PDF embedded text and since it may have changes in the order of the information, I use Gemini as a sophisitcated parser and i constrain its repsonse to only output text that is in the input text. Moreover I add a deterministic function to verfify the response. These measures make the probabilistic nature of LLMs not a risk for the process.
